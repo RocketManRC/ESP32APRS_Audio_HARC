@@ -188,10 +188,13 @@ void getSensor(uint32_t type, uint32_t *val, int i)
     }
 }
 
+char strtmp[300]; // use RAM instead of stack
+
 int getRawWx(char *strData)
 {
     unsigned int i;
-    char strtmp[300], obj[30];
+    //char strtmp[300], obj[30];
+    char obj[30];
 
     memset(&obj[0], 0, sizeof(obj));
 

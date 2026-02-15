@@ -28,8 +28,8 @@
 
 #include "esp_dsp.h"
 #include <dsps_fir.h>
-#ifdef CONFIG_IDF_TARGET_ESP32C3
-#include <esp32c3/rom/crc.h>
+#ifdef CONFIG_IDF_TARGET_ESP32S3
+#include <esp32s3/rom/crc.h>
 #else
 #include "esp32/rom/crc.h"
 #endif

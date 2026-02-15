@@ -4588,6 +4588,8 @@ void digi_status(char *text)
     pkgTxPush(tnc2Raw.c_str(), tnc2Raw.length(), 0, SendMode);
 }
 
+char WxRaw[500]; // use RAM instead of stack
+
 String wx_report(double lat, double lon, double alt, String comment)
 {
     String tnc2Raw = "";
@@ -4670,7 +4672,7 @@ String wx_report(double lat, double lon, double alt, String comment)
     }
     tnc2Raw += ":";
     tnc2Raw += String(loc);
-    char WxRaw[500];
+    //char WxRaw[500];
     memset(WxRaw, 0, 500);
     getRawWx(&WxRaw[0]);
     tnc2Raw += String(WxRaw);
