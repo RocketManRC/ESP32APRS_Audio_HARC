@@ -144,9 +144,9 @@ Suppose you have a Modbus RTU wind speed sensor at slave address 1, register 0, 
 
 ### Reading via Modbus TCP Gateway
 
-To read the same sensor through a Modbus TCP gateway at 192.168.1.100:
+To read the same sensor through a Modbus TCP gateway at 192.168.4.2 (connected via the gateway's access point):
 
-1. **MODBUS settings**: Enable, PORT = `TCP`, TCP Host = `192.168.1.100`, TCP Port = `502`
+1. **MODBUS settings**: Enable, PORT = `TCP`, TCP Host = `192.168.4.2`, TCP Port = `502`
 2. **Sensor slot**: Same as above — Port = `MODBUS_16`, Address = `1000`
 3. The gateway translates TCP requests to RTU on its serial side.
 

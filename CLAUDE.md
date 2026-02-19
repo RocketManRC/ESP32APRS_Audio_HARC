@@ -104,7 +104,7 @@ Raw values are transformed by the equation `a*v² + b*v + c` using the `eqns[3]`
 
 The `modbusRead()` helper in `src/sensor.cpp` abstracts RTU vs TCP — it checks `config.modbus_channel` and dispatches to the appropriate eModbus client.
 
-**Companion server:** The ESP32-S3-WX-Modbus project at `/Users/rick/Sync/Projects/PlatformIO/ESP32-S3-WX-Modbus` provides the Modbus TCP server. See its `CLAUDE.md` for register map and client configuration details.
+**Companion server:** The [ESP32-S3-WX-Modbus](https://github.com/RocketManRC/ESP32-S3-WX-Modbus) project provides the Modbus TCP server. The gateway connects via its access point at `192.168.4.2` (port 502). See its `CLAUDE.md` for register map and client configuration details.
 
 ### Web UI Live Updates
 
