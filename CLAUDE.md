@@ -123,6 +123,26 @@ Boot to WiFi-responsive takes ~7-25 seconds. The main delays in order:
 3. **2-10s** — `wifiMulti.run(10000)` WiFi scan/connect timeout (line 7749)
 4. **~1s** — NTP sync and web service init in `taskNetwork`
 
+### Status LED
+
+A NeoPixel (WS2812) RGB LED or dual discrete LEDs provide visual status:
+
+**Startup countdown** (3s BOOT button factory-reset window):
+1. Red — 1 second
+2. Green — 1 second
+3. Blue — 1 second
+
+If BOOT is held during this window, the LED flashes white (factory reset mode).
+
+**Normal operation:**
+- **Red** — Transmitting (PTT active)
+- **Green** — Receiving (DCD — data carrier detected on RF)
+- **Off** — Idle
+
+LED control is in `LED_Status2()` in `lib/LibAPRS_ESP32/AFSK.cpp`, called from `setPtt()` (TX) and `setDcd()` in `modem.cpp` (RX). A 100ms rate-limit prevents NeoPixel flickering. Note: without an audio input or squelch signal, ADC noise can cause false DCD (green LED on intermittently) — this is normal modem behavior, not a bug.
+
+Fallback for boards without NeoPixel: red LED on GPIO 4 (TX), green LED on GPIO 2 (RX).
+
 ### Partition Tables
 
 Custom partition CSVs in project root (`flash_default_8MB.csv`, `flash_default_16MB.csv`, `flash_default_32MB.csv`) with dual OTA slots and SPIFFS.

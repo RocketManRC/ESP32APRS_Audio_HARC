@@ -261,44 +261,40 @@ RingBuffer fifo; // Declare a ring buffer statically (this will be in DRAM, but 
 
 void LED_Status2(uint8_t r, uint8_t g, uint8_t b)
 {
-  // portENTER_CRITICAL_ISR(&ledMux);          // ISR start
   if (r == r_old && g == g_old && b == b_old)
   {
-    rgbTimeout = millis() + 100;
+    return; // No change, nothing to do
+  }
+  if (millis() < rgbTimeout)
+  {
+    return; // Rate-limit same-state flickering
+  }
+  rgbTimeout = millis() + 100;
+  r_old = r;
+  g_old = g;
+  b_old = b;
+  if (_led_strip_pin > -1 && strip != NULL)
+  {
+    strip->setPixelColor(0, strip->Color(r, g, b));
+    strip->show();
   }
   else
   {
-    if (millis() > rgbTimeout)
+    if (_led_tx_pin > -1)
     {
-      rgbTimeout = millis() + 100;
-      r_old = r;
-      g_old = g;
-      b_old = b;
-      if (_led_strip_pin > -1 && strip != NULL)
-      {
-        strip->setPixelColor(0, strip->Color(r, g, b));
-        strip->show();
-      }
+      if (r > 0)
+        digitalWrite(_led_tx_pin, HIGH);
       else
-      {
-        if (_led_tx_pin > -1)
-        {
-          if (r > 0)
-            digitalWrite(_led_tx_pin, HIGH);
-          else
-            digitalWrite(_led_tx_pin, LOW);
-        }
-        if (_led_rx_pin > -1)
-        {
-          if (g > 0)
-            digitalWrite(_led_rx_pin, HIGH);
-          else
-            digitalWrite(_led_rx_pin, LOW);
-        }
-      }
+        digitalWrite(_led_tx_pin, LOW);
+    }
+    if (_led_rx_pin > -1)
+    {
+      if (g > 0)
+        digitalWrite(_led_rx_pin, HIGH);
+      else
+        digitalWrite(_led_rx_pin, LOW);
     }
   }
-  // portEXIT_CRITICAL_ISR(&ledMux);
 }
 
 // const float resample_coeffs[FILTER_TAPS] = {
