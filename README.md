@@ -1,3 +1,5 @@
+## Note that this is forked from the orignal project with significant changes to support the requirements of a weather station project for the Halifax Amateur Radio Club (HARC).  Look in the CLAUDE.md file for details and in the doc folder for additional information.
+
 ## Arduino core for the ESP32, ESP32-C3, ESP32-C6 and ESP32-S3
 
 # ESP32APRS Audio(Speaker/Mic) Project
