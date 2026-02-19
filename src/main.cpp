@@ -1366,6 +1366,11 @@ void logWeather(double lat, double lon, double speed, double course)
 void defaultConfig()
 {
     log_d("Default configure mode!");
+#ifdef __XTENSA__
+    config.cpuFreq = 240;
+#else
+    config.cpuFreq = 160;
+#endif
     config.synctime = true;
     config.timeZone = 7;
     config.tx_timeslot = 2000; // ms
@@ -2443,11 +2448,19 @@ int pkgListUpdate(char *call, char *raw, uint16_t type, bool channel, uint16_t a
             pkgList[i].length = len + 1;
             if (pkgList[i].raw != NULL)
             {
+#ifdef BOARD_HAS_PSRAM
+                pkgList[i].raw = (char *)ps_realloc(pkgList[i].raw, pkgList[i].length);
+#else
                 pkgList[i].raw = (char *)realloc(pkgList[i].raw, pkgList[i].length);
+#endif
             }
             else
             {
+#ifdef BOARD_HAS_PSRAM
+                pkgList[i].raw = (char *)ps_calloc(pkgList[i].length, sizeof(char));
+#else
                 pkgList[i].raw = (char *)calloc(pkgList[i].length, sizeof(char));
+#endif
             }
             if (pkgList[i].raw)
             {
@@ -2500,11 +2513,19 @@ int pkgListUpdate(char *call, char *raw, uint16_t type, bool channel, uint16_t a
         pkgList[i].length = len + 1;
         if (pkgList[i].raw != NULL)
         {
+#ifdef BOARD_HAS_PSRAM
+            pkgList[i].raw = (char *)ps_realloc(pkgList[i].raw, pkgList[i].length);
+#else
             pkgList[i].raw = (char *)realloc(pkgList[i].raw, pkgList[i].length);
+#endif
         }
         else
         {
+#ifdef BOARD_HAS_PSRAM
+            pkgList[i].raw = (char *)ps_calloc(pkgList[i].length, sizeof(char));
+#else
             pkgList[i].raw = (char *)calloc(pkgList[i].length, sizeof(char));
+#endif
         }
         if (pkgList[i].raw)
         {
@@ -3512,7 +3533,11 @@ void setup()
     xTaskCreatePinnedToCore(
         taskNetwork,        /* Function to implement the task */
         "taskNetwork",      /* Name of the task */
-        12000,              /* Stack size in words */
+#if (CORE_DEBUG_LEVEL > 0)
+        8192,               /* Stack size in words (debug) */
+#else
+        6200,               /* Stack size in words */
+#endif
         NULL,               /* Task input parameter */
         1,                  /* Priority of the task */
         &taskNetworkHandle, /* Task handle. */
@@ -3529,7 +3554,11 @@ void setup()
     xTaskCreatePinnedToCore(
         taskAPRS,        /* Function to implement the task */
         "taskAPRS",      /* Name of the task */
+#if (CORE_DEBUG_LEVEL > 0)
+        8192,            /* Stack size in words (debug) */
+#else
         4096,            /* Stack size in words */
+#endif
         NULL,            /* Task input parameter */
         2,               /* Priority of the task */
         &taskAPRSHandle, /* Task handle. */
@@ -3540,7 +3569,11 @@ void setup()
     xTaskCreatePinnedToCore(
         taskNetwork,        /* Function to implement the task */
         "taskNetwork",      /* Name of the task */
-        12000,              /* Stack size in words */
+#if (CORE_DEBUG_LEVEL > 0)
+        8192,               /* Stack size in words (debug) */
+#else
+        6200,               /* Stack size in words */
+#endif
         NULL,               /* Task input parameter */
         1,                  /* Priority of the task */
         &taskNetworkHandle, /* Task handle. */
@@ -3559,7 +3592,11 @@ void setup()
     xTaskCreatePinnedToCore(
         taskAPRS,        /* Function to implement the task */
         "taskAPRS",      /* Name of the task */
-        6000,            /* Stack size in words */
+#if (CORE_DEBUG_LEVEL > 0)
+        8192,            /* Stack size in words (debug) */
+#else
+        4096,            /* Stack size in words */
+#endif
         NULL,            /* Task input parameter */
         2,               /* Priority of the task */
         &taskAPRSHandle, /* Task handle. */
@@ -3669,7 +3706,7 @@ String compress_position(double nowLat, double nowLng, int alt_feed, double cour
     memset(aprs_position, 0, sizeof(aprs_position));
 
     base91encode(ltemp, aprs_position);
-    ltemp = 1073741824L + (longitude >> 1); // 180 degrees + longitude
+    ltemp = 1073741824L + (longitude / 2L); // 180 degrees + longitude
     base91encode(ltemp, aprs_position + 4);
     // Encode heading
     uint8_t c = (uint8_t)(course / 4);
@@ -3835,7 +3872,6 @@ String compressMicE(char *destCallsign, float lat, float lon, uint16_t heading, 
 
     // prepare buffers
     // char destCallsign[7];
-#if !RADIOLIB_STATIC_ONLY
     size_t infoLen = 10;
     if (telemLen > 0)
     {
@@ -3856,10 +3892,11 @@ String compressMicE(char *destCallsign, float lat, float lon, uint16_t heading, 
             infoLen += 4;
         }
     }
-    char *info = new char[infoLen];
-#else
-    char info[RADIOLIB_STATIC_ARRAY_SIZE];
-#endif
+    char *info = (char *)calloc(1, infoLen);
+    if(info == NULL)
+    {
+        return strRet;
+    }
     size_t infoPos = 0;
 
     // the following is based on APRS Mic-E implementation by https://github.com/omegat
@@ -4021,6 +4058,7 @@ String compressMicE(char *destCallsign, float lat, float lon, uint16_t heading, 
     info[infoPos++] = '\0';
 
     strRet = String(info);
+    free(info);
     return strRet;
 }
 
@@ -4342,9 +4380,9 @@ String trk_fix_position(String comment)
     {
         memset(strtmp, 0, 300);
         if (config.trk_ssid == 0)
-            sprintf(strtmp, "%s>APE32A", config.trk_mycall);
+            snprintf(strtmp, 300, "%s>APE32A", config.trk_mycall);
         else
-            sprintf(strtmp, "%s-%d>APE32A", config.trk_mycall, config.trk_ssid);
+            snprintf(strtmp, 300, "%s-%d>APE32A", config.trk_mycall, config.trk_ssid);
         tnc2Raw = String(strtmp);
         free(strtmp);
     }
@@ -6279,16 +6317,16 @@ void taskAPRS(void *pvParameters)
     for (;;)
     {
 
-        // if (adcEn == 1)
-        // {
-        //     AFSK_TimerEnable(true);
-        //     adcEn = 0;
-        // }
-        // else if (adcEn == -1)
-        // {
-        //     AFSK_TimerEnable(false);
-        //     adcEn = 0;
-        // }
+        if (adcEn == 1)
+        {
+            AFSK_TimerEnable(true);
+            adcEn = 0;
+        }
+        else if (adcEn == -1)
+        {
+            AFSK_TimerEnable(false);
+            adcEn = 0;
+        }
 
         if (dacEn == 1)
         {
@@ -7416,14 +7454,8 @@ void taskAPRS(void *pvParameters)
                         {
                             if (config.digi_delay == 0)
                             { // Auto mode
-                              // if (digiCount > 20)
-                              //   digiDelay = random(5000);
-                              // else if (digiCount > 10)
-                              //   digiDelay = random(3000);
-                              // else if (digiCount > 0)
-                              //   digiDelay = random(1500);
-                              // else
-                                digiDelay = random(100);
+                                //digiDelay = random(3000);
+                                digiDelay = 0;
                             }
                             else
                             {
@@ -8079,8 +8111,8 @@ void taskNetwork(void *pvParameters)
         // }
         wifiConnection();
 
-        wifiMulti.setStrictMode(false); // Default is true.  Library will disconnect and forget currently connected AP if it's not in the AP list.
-        wifiMulti.setAllowOpenAP(true); // Default is false.  True adds open APs to the AP list.
+        wifiMulti.setStrictMode(true); // Default is true.  Library will disconnect and forget currently connected AP if it's not in the AP list.
+        wifiMulti.setAllowOpenAP(false); // Default is false.  True adds open APs to the AP list.
     }
 
     if (config.wifi_mode & WIFI_AP_FIX)
