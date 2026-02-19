@@ -13,10 +13,6 @@
 
 #include "main.h"
 #include "sensor.h"
-//#include <ModbusMaster.h>
-
-//Format: c...s...g...t...r...p...P...h..b.....L...S...m...M...w...W....v...d...D...x....F....o....u..n...
-//#define WX_SENSOR_NUM 23
 
 #define WX_NONE 0
 #define WX_WIND_DIR (1 << 0)       // c Wind Direction (in degrees)
@@ -89,7 +85,4 @@ void getSensor(uint32_t type, float *val, int i);
 void getSensor(uint32_t type, uint16_t *val, int i);
 void getSensor(uint32_t type, uint32_t *val, int i);
 int getWxJson(char *strData);
-// bool getM70xModbus(ModbusMaster &node);
-// bool getM70xModbus(ModbusMaster &node, uint32_t sensor);
-
 #endif

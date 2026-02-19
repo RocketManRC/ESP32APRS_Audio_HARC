@@ -1243,6 +1243,44 @@ String event_chatMessage(bool gethtml)
 	return "";
 }
 
+static File uploadFile;
+static bool uploadSuccess;
+
+void handle_upload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
+{
+    if(!index)
+    {
+        if(!request->authenticate(config.http_username, config.http_password))
+        {
+            return;
+        }
+        String destName = filename;
+        if(request->hasParam("dest"))
+        {
+            String d = request->getParam("dest")->value();
+            if(d.length() > 0)
+            {
+                destName = d;
+            }
+        }
+        log_d("Upload Start: %s -> %s", filename.c_str(), destName.c_str());
+        uploadFile = LITTLEFS.open("/" + destName, FILE_WRITE);
+        uploadSuccess = uploadFile ? true : false;
+    }
+    if(uploadFile && len)
+    {
+        uploadFile.write(data, len);
+    }
+    if(final)
+    {
+        if(uploadFile)
+        {
+            uploadFile.close();
+            log_d("Upload Complete: %s, %u bytes", filename.c_str(), index + len);
+        }
+    }
+}
+
 void handle_storage(AsyncWebServerRequest *request)
 {
 	if (!request->authenticate(config.http_username, config.http_password))
@@ -1319,6 +1357,21 @@ void handle_storage(AsyncWebServerRequest *request)
 		file = root.openNextFile();
 	}
 	webString += "</table>\n";
+	webString += "<br/><div style=\"color:red;font-size:8pt;\">Note: If you upload a file as default.cfg you must reboot for it to take effect.</div>\n";
+	webString += "<form method='POST' action='/upload' enctype='multipart/form-data'>\n";
+	webString += "<input type='file' name='file' id='upFile'>&nbsp;";
+	webString += "Save as: <input type='text' name='dest' id='upDest' size='20'>&nbsp;";
+	webString += "<button class='button' type='submit'> Upload </button>\n";
+	webString += "</form>\n";
+	webString += "<script>";
+	webString += "document.getElementById('upFile').addEventListener('change',function(){";
+	webString += "document.getElementById('upDest').value=this.files[0]?this.files[0].name:'';});";
+	webString += "document.querySelector('form[action=\"/upload\"]').addEventListener('submit',function(e){";
+	webString += "e.preventDefault();var f=new FormData(this);";
+	webString += "var d=encodeURIComponent(document.getElementById('upDest').value);";
+	webString += "fetch('/upload?dest='+d,{method:'POST',body:f}).then(function(r){return r.text();}).then(function(){location.reload();});";
+	webString += "});";
+	webString += "</script>\n";
 	webString += "<form accept-charset=\"UTF-8\" action=\"/format\" class=\"form-horizontal\" id=\"format_form\" method=\"post\">\n";
 	webString += "<div><button class=\"button\" type='submit' id='format_form_sumbit'  name=\"commit\"> FORMAT </button></div>\n";
 	webString += "</form><br/>\n";
@@ -3080,6 +3133,19 @@ void handle_mod(AsyncWebServerRequest *request)
 					config.modbus_de_gpio = request->arg(i).toInt();
 				}
 			}
+
+			if (request->argName(i) == "tcphost")
+			{
+				strlcpy(config.modbus_tcp_host, request->arg(i).c_str(), sizeof(config.modbus_tcp_host));
+			}
+
+			if (request->argName(i) == "tcpport")
+			{
+				if (isValidNumber(request->arg(i)))
+				{
+					config.modbus_tcp_port = request->arg(i).toInt();
+				}
+			}
 		}
 
 		config.modbus_enable = En;
@@ -4211,6 +4277,16 @@ void handle_mod(AsyncWebServerRequest *request)
 		html += "<tr>\n";
 		html += "<td align=\"right\"><b>DE:</b></td>\n";
 		html += "<td style=\"text-align: left;\"><input min=\"-1\" max=\""+String(GPIO_NUM_MAX)+"\" name=\"de\" type=\"number\" value=\"" + String(config.modbus_de_gpio) + "\" /></td>\n";
+		html += "</tr>\n";
+
+		html += "<tr>\n";
+		html += "<td align=\"right\"><b>TCP Host:</b></td>\n";
+		html += "<td style=\"text-align: left;\"><input name=\"tcphost\" type=\"text\" maxlength=\"63\" value=\"" + String(config.modbus_tcp_host) + "\" /></td>\n";
+		html += "</tr>\n";
+
+		html += "<tr>\n";
+		html += "<td align=\"right\"><b>TCP Port:</b></td>\n";
+		html += "<td style=\"text-align: left;\"><input min=\"1\" max=\"65535\" name=\"tcpport\" type=\"number\" value=\"" + String(config.modbus_tcp_port) + "\" /></td>\n";
 		html += "</tr>\n";
 
 		html += "<tr><td colspan=\"2\" align=\"right\">\n";
@@ -8181,6 +8257,25 @@ void handle_tlm(AsyncWebServerRequest *request)
 
 extern TaskHandle_t taskSensorHandle;
 
+void handle_sensordata(AsyncWebServerRequest *request)
+{
+	if(!request->authenticate(config.http_username, config.http_password))
+	{
+		return request->requestAuthentication();
+	}
+	String json = "[";
+	for(int i = 0; i < SENSOR_NUMBER; i++)
+	{
+		if(i > 0)
+		{
+			json += ",";
+		}
+		json += String(sen[i].sample, 2);
+	}
+	json += "]";
+	request->send(200, "application/json", json);
+}
+
 void handle_sensor(AsyncWebServerRequest *request)
 {
 	if (!request->authenticate(config.http_username, config.http_password))
@@ -8419,6 +8514,19 @@ void handle_sensor(AsyncWebServerRequest *request)
 		html += "}else{\n";
 		html += "document.getElementById(\"address\"+idx).value=0;\n";
 		html += "}\n}\n";
+		html += "</script>\n";
+
+		html += "<script type=\"text/javascript\">\n";
+		html += "function refreshSensorValues() {\n";
+		html += "  $.getJSON('/sensordata', function(data) {\n";
+		html += "    for(var i = 0; i < data.length; i++) {\n";
+		html += "      var el = document.getElementById('sVal' + i);\n";
+		html += "      if(el) el.value = data[i].toFixed(2);\n";
+		html += "    }\n";
+		html += "    setTimeout(refreshSensorValues, 5000);\n";
+		html += "  }).fail(function() { setTimeout(refreshSensorValues, 10000); });\n";
+		html += "}\n";
+		html += "setTimeout(refreshSensorValues, 5000);\n";
 		html += "</script>\n";
 
 		/************************ Sensor Monitor **************************/
@@ -10343,6 +10451,8 @@ void webService()
 					{ handle_tlm(request); });
 	async_server.on("/sensor", HTTP_GET | HTTP_POST, [](AsyncWebServerRequest *request)
 					{ handle_sensor(request); });
+	async_server.on("/sensordata", HTTP_GET, [](AsyncWebServerRequest *request)
+					{ handle_sensordata(request); });
 	async_server.on("/system", HTTP_GET | HTTP_POST, [](AsyncWebServerRequest *request)
 					{ handle_system(request); });
 	async_server.on("/wireless", HTTP_GET | HTTP_POST, [](AsyncWebServerRequest *request)
@@ -10369,6 +10479,16 @@ void webService()
 					{ handle_jquery(request); });
 	async_server.on("/storage", HTTP_GET | HTTP_POST, [](AsyncWebServerRequest *request)
 					{ handle_storage(request); });
+	async_server.on(
+		"/upload", HTTP_POST, [](AsyncWebServerRequest *request)
+		{
+			if(!request->authenticate(config.http_username, config.http_password))
+			{
+				return request->requestAuthentication();
+			}
+			request->send(200, "text/plain", uploadSuccess ? "OK" : "FAIL");
+		},
+		handle_upload);
 	async_server.on("/download", HTTP_GET | HTTP_POST, [](AsyncWebServerRequest *request)
 					{ handle_download(request); });
 	async_server.on("/delete", HTTP_GET | HTTP_POST, [](AsyncWebServerRequest *request)

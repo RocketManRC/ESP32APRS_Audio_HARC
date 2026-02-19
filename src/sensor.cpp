@@ -17,7 +17,8 @@
 #include <Adafruit_Si7021.h>
 #include <Adafruit_CCS811.h>
 #include <SHTSensor.h>
-#include <ModbusMaster.h>
+#include <ModbusClientRTU.h>
+#include <ModbusClientTCP.h>
 #include <TinyGPS++.h>
 #include <soc/gpio_struct.h>
 #include <ESPCPUTemp.h>
@@ -30,7 +31,8 @@
 extern TwoWire Wire1;
 extern Configuration config;
 extern WiFiClient aprsClient;
-extern ModbusMaster modbus;
+extern ModbusClientRTU *modbusRTU;
+extern ModbusClientTCP *modbusTCP;
 extern bool i2c_busy;
 extern TinyGPSPlus gps;
 extern double VBat;
@@ -587,79 +589,85 @@ bool getSAT()
     return false;
 }
 
-bool getM701Modbus(ModbusMaster &node)
+ModbusMessage modbusRead(uint8_t slaveAddr, uint16_t regAddr, uint16_t count)
 {
-    uint8_t result;
+    if (config.modbus_channel >= 1 && config.modbus_channel <= 3 && modbusRTU)
+    {
+        return modbusRTU->syncRequest((uint32_t)millis(), slaveAddr, READ_HOLD_REGISTER, regAddr, count);
+    }
+    else if (config.modbus_channel == 4 && modbusTCP)
+    {
+        return modbusTCP->syncRequest((uint32_t)millis(), slaveAddr, READ_HOLD_REGISTER, regAddr, count);
+    }
+    ModbusMessage empty;
+    empty.setError(slaveAddr, READ_HOLD_REGISTER, ILLEGAL_FUNCTION);
+    return empty;
+}
 
-    result = node.readHoldingRegisters(0x0002, 7);
-    if (result == node.ku8MBSuccess)
+bool getM701Modbus(uint8_t slaveAddr)
+{
+    ModbusMessage response = modbusRead(slaveAddr, 0x0002, 7);
+    if (response.getError() == SUCCESS)
     {
         for (int i = 0; i < SENSOR_NUMBER; i++)
         {
             if(!config.sensor[i].enable) continue;
+            uint16_t val;
             if (config.sensor[i].type == SENSOR_CO2 && config.sensor[i].port == PORT_M701)
             {
-                sensorUpdate(i, node.getResponseBuffer(0)); // Co2
+                response.get(3, val); // Co2
+                sensorUpdate(i, val);
             }
             else if (config.sensor[i].type == SENSOR_CH2O && config.sensor[i].port == PORT_M701)
             {
-                sensorUpdate(i, node.getResponseBuffer(1)); // CH2O
+                response.get(5, val); // CH2O
+                sensorUpdate(i, val);
             }
             else if (config.sensor[i].type == SENSOR_TVOC && config.sensor[i].port == PORT_M701)
             {
-                sensorUpdate(i, node.getResponseBuffer(2)); // TVOC
+                response.get(7, val); // TVOC
+                sensorUpdate(i, val);
             }
             else if (config.sensor[i].type == SENSOR_PM25 && config.sensor[i].port == PORT_M701)
             {
-                sensorUpdate(i, node.getResponseBuffer(3)); // PM 2.5
+                response.get(9, val); // PM 2.5
+                sensorUpdate(i, val);
             }
             else if (config.sensor[i].type == SENSOR_PM100 && config.sensor[i].port == PORT_M701)
             {
-                sensorUpdate(i, node.getResponseBuffer(4)); // PM 10.0
+                response.get(11, val); // PM 10.0
+                sensorUpdate(i, val);
             }
             else if (config.sensor[i].type == SENSOR_TEMPERATURE && config.sensor[i].port == PORT_M701)
             {
-                sensorUpdate(i, node.getResponseBuffer(5)); // Temperature
+                response.get(13, val); // Temperature
+                sensorUpdate(i, val);
             }
             else if (config.sensor[i].type == SENSOR_HUMIDITY && config.sensor[i].port == PORT_M701)
             {
-                sensorUpdate(i, node.getResponseBuffer(6)); // Humidity
+                response.get(15, val); // Humidity
+                sensorUpdate(i, val);
             }
         }
-        // co2 = (uint32_t)node.getResponseBuffer(0);                        // Co2 PPM
-        // ch2o = node.getResponseBuffer(1);                       // ug
-        // tvoc = node.getResponseBuffer(2);                       // ug
-        // pm25 = node.getResponseBuffer(3);                       // PM2.5ug
-        // pm100 = node.getResponseBuffer(4);                      // PM10 ug
-        // &temperature = (double)node.getResponseBuffer(5) / 10.0f; // C
-        // humidity = (double)node.getResponseBuffer(6) / 10.0f;    //%RH
         return true;
-    }
-    else
-    {
-        // for (int i = 0; i < SENSOR_NUMBER; i++)
-        // {
-        //     if(config.sensor[i].type == SENSOR_CO2 | )
-        //     sen[i].visable = false;
-        // }
     }
     return false;
 }
 
-bool getM702Modbus(ModbusMaster &node)
+bool getM702Modbus(uint8_t slaveAddr)
 {
-    uint8_t result;
-
-    result = node.readHoldingRegisters(0x0006, 5);
-    if (result == node.ku8MBSuccess)
+    ModbusMessage response = modbusRead(slaveAddr, 0x0006, 5);
+    if (response.getError() == SUCCESS)
     {
         for (int i = 0; i < SENSOR_NUMBER; i++)
         {
             if(!config.sensor[i].enable) continue;
+            uint16_t val;
             if (config.sensor[i].type == SENSOR_TVOC && config.sensor[i].port == PORT_M702)
             {
+                response.get(3, val); // TVOC ug
                 sen[i].visable = true;
-                sen[i].sample = (double)node.getResponseBuffer(0); // ug
+                sen[i].sample = (double)val;
                 sen[i].sample = (config.sensor[i].eqns[0] * pow(sen[i].sample, 2)) + (config.sensor[i].eqns[1] * sen[i].sample) + config.sensor[i].eqns[2];
                 sen[i].sum += sen[i].sample;
                 sen[i].counter++;
@@ -678,8 +686,9 @@ bool getM702Modbus(ModbusMaster &node)
             }
             else if (config.sensor[i].type == SENSOR_PM25 && config.sensor[i].port == PORT_M702)
             {
+                response.get(5, val); // PM2.5ug
                 sen[i].visable = true;
-                sen[i].sample = (double)node.getResponseBuffer(1); // PM2.5ug
+                sen[i].sample = (double)val;
                 sen[i].sample = (config.sensor[i].eqns[0] * pow(sen[i].sample, 2)) + (config.sensor[i].eqns[1] * sen[i].sample) + config.sensor[i].eqns[2];
                 sen[i].sum += sen[i].sample;
                 sen[i].counter++;
@@ -698,8 +707,9 @@ bool getM702Modbus(ModbusMaster &node)
             }
             else if (config.sensor[i].type == SENSOR_PM100 && config.sensor[i].port == PORT_M702)
             {
+                response.get(7, val); // PM10 ug
                 sen[i].visable = true;
-                sen[i].sample = (double)node.getResponseBuffer(2); // PM10 ug
+                sen[i].sample = (double)val;
                 sen[i].sample = (config.sensor[i].eqns[0] * pow(sen[i].sample, 2)) + (config.sensor[i].eqns[1] * sen[i].sample) + config.sensor[i].eqns[2];
                 sen[i].sum += sen[i].sample;
                 sen[i].counter++;
@@ -718,8 +728,9 @@ bool getM702Modbus(ModbusMaster &node)
             }
             else if (config.sensor[i].type == SENSOR_TEMPERATURE && config.sensor[i].port == PORT_M702)
             {
+                response.get(9, val); // Temperature
                 sen[i].visable = true;
-                sen[i].sample = (double)node.getResponseBuffer(3) / 10.0f; // C
+                sen[i].sample = (double)val / 10.0f; // C
                 sen[i].sample = (config.sensor[i].eqns[0] * pow(sen[i].sample, 2)) + (config.sensor[i].eqns[1] * sen[i].sample) + config.sensor[i].eqns[2];
                 sen[i].sum += sen[i].sample;
                 sen[i].counter++;
@@ -738,8 +749,9 @@ bool getM702Modbus(ModbusMaster &node)
             }
             else if (config.sensor[i].type == SENSOR_HUMIDITY && config.sensor[i].port == PORT_M702)
             {
+                response.get(11, val); // Humidity
                 sen[i].visable = true;
-                sen[i].sample = (double)node.getResponseBuffer(4) / 10.0f; //%RH
+                sen[i].sample = (double)val / 10.0f; //%RH
                 sen[i].sample = (config.sensor[i].eqns[0] * pow(sen[i].sample, 2)) + (config.sensor[i].eqns[1] * sen[i].sample) + config.sensor[i].eqns[2];
                 sen[i].sum += sen[i].sample;
                 sen[i].counter++;
@@ -757,85 +769,83 @@ bool getM702Modbus(ModbusMaster &node)
                 }
             }
         }
-        // tvoc = node.getResponseBuffer(2);                       // ug
-        // pm25 = node.getResponseBuffer(3);                       // PM2.5ug
-        // pm100 = node.getResponseBuffer(4);                      // PM10 ug
-        // &temperature = (double)node.getResponseBuffer(5) / 10.0f; // C
-        // humidity = (double)node.getResponseBuffer(6) / 10.0f;    //%RH
         return true;
     }
     return false;
 }
 
-bool getPZEMModbus(ModbusMaster &node)
+bool getPZEMModbus(uint8_t slaveAddr)
 {
-    uint8_t result;
-
-    result = node.readHoldingRegisters(0x0000, 9);
-    if (result == node.ku8MBSuccess)
+    ModbusMessage response = modbusRead(slaveAddr, 0x0000, 9);
+    if (response.getError() == SUCCESS)
     {
         for (int i = 0; i < SENSOR_NUMBER; i++)
         {
             if(!config.sensor[i].enable) continue;
+            uint16_t reg;
             if (config.sensor[i].type == SENSOR_VOLTAGE && config.sensor[i].port == PORT_PZEM)
             {
-                double val = (double)node.getResponseBuffer(0); // Voltage 0x0000
-                val *= 0.1F; //to value 0.1V
+                response.get(3, reg); // Voltage 0x0000
+                double val = (double)reg * 0.1F;
                 sensorUpdate(i, val);
             }
             else if (config.sensor[i].type == SENSOR_CURRENT && config.sensor[i].port == PORT_PZEM)
             {
-                uint32_t val32 = (uint32_t)node.getResponseBuffer(2); // Current 0x0002 MSB
-                val32 <<= 16;
-                val32 |= (uint32_t)node.getResponseBuffer(1); // Current 0x000 LSB
-                double val = (double)val32*0.001F; //to value 0.001A
+                uint16_t msb, lsb;
+                response.get(5, lsb); // Current 0x0001 LSB
+                response.get(7, msb); // Current 0x0002 MSB
+                uint32_t val32 = ((uint32_t)msb << 16) | (uint32_t)lsb;
+                double val = (double)val32 * 0.001F;
                 sensorUpdate(i, val);
             }
             else if (config.sensor[i].type == SENSOR_POWER && config.sensor[i].port == PORT_PZEM)
             {
-                uint32_t val32 = (uint32_t)node.getResponseBuffer(4); // Power 0x0004 MSB
-                val32 <<= 16;
-                val32 |= (uint32_t)node.getResponseBuffer(3); // Power 0x0003 LSB
-                double val = (double)val32*0.1F; //to value 0.1W
+                uint16_t msb, lsb;
+                response.get(9, lsb);  // Power 0x0003 LSB
+                response.get(11, msb); // Power 0x0004 MSB
+                uint32_t val32 = ((uint32_t)msb << 16) | (uint32_t)lsb;
+                double val = (double)val32 * 0.1F;
                 sensorUpdate(i, val);
             }
             else if (config.sensor[i].type == SENSOR_ENERGY && config.sensor[i].port == PORT_PZEM)
             {
-                uint32_t val32 = (uint32_t)node.getResponseBuffer(6); // Energy 0x0006 MSB
-                val32 <<= 16;
-                val32 |= (uint32_t)node.getResponseBuffer(5); // Energy 0x0005 LSB
-                double val = (double)val32; //to value 1W
+                uint16_t msb, lsb;
+                response.get(13, lsb); // Energy 0x0005 LSB
+                response.get(15, msb); // Energy 0x0006 MSB
+                uint32_t val32 = ((uint32_t)msb << 16) | (uint32_t)lsb;
+                double val = (double)val32;
                 sensorUpdate(i, val);
             }
             else if (config.sensor[i].type == SENSOR_FREQ && config.sensor[i].port == PORT_PZEM)
             {
-                double val = (double)node.getResponseBuffer(7); // Frequency 0x0007
-                val *= 0.1F; //to value 0.1Hz
+                response.get(17, reg); // Frequency 0x0007
+                double val = (double)reg * 0.1F;
                 sensorUpdate(i, val);
             }
             else if (config.sensor[i].type == SENSOR_PF && config.sensor[i].port == PORT_PZEM)
             {
-                double val = (double)node.getResponseBuffer(8); // Frequency 0x0008
-                val *= 0.01F; //to value 0.01
+                response.get(19, reg); // Power Factor 0x0008
+                double val = (double)reg * 0.01F;
                 sensorUpdate(i, val);
-            }            
+            }
         }
         return true;
     }
     return false;
 }
 
-bool getModbus16Bit(ModbusMaster &node, int i)
+bool getModbus16Bit(uint8_t slaveAddr, int i)
 {
-    uint8_t result;
     uint16_t addr = config.sensor[i].address % 1000;
-log_d("Modbus Reg=%d",addr);
-    result = node.readHoldingRegisters(addr, 1);
-    if (result == node.ku8MBSuccess)
+    log_d("Modbus Reg=%d", addr);
+    ModbusMessage response = modbusRead(slaveAddr, addr, 1);
+    if (response.getError() == SUCCESS)
     {
         if (config.sensor[i].port == PORT_MODBUS_16)
         {
-            double val = (double)node.getResponseBuffer(0); // 0x0000
+            uint16_t reg;
+            response.get(3, reg);
+            double val = (double)reg;
             sensorUpdate(i, val);
             return true;
         }
@@ -843,20 +853,19 @@ log_d("Modbus Reg=%d",addr);
     return false;
 }
 
-bool getModbus32Bit(ModbusMaster &node, int i)
+bool getModbus32Bit(uint8_t slaveAddr, int i)
 {
-    uint8_t result;
     uint16_t addr = config.sensor[i].address % 1000;
-
-    result = node.readHoldingRegisters(addr, 2);
-    if (result == node.ku8MBSuccess)
+    ModbusMessage response = modbusRead(slaveAddr, addr, 2);
+    if (response.getError() == SUCCESS)
     {
         if (config.sensor[i].port == PORT_MODBUS_32)
         {
-            uint32_t val32 = (uint32_t)node.getResponseBuffer(0); // MSB
-            val32 <<= 16;
-            val32 |= (uint32_t)node.getResponseBuffer(1); // LSB
-            double val = (double)val32;                   // to value double
+            uint16_t msb, lsb;
+            response.get(3, msb); // MSB (first register)
+            response.get(5, lsb); // LSB (second register)
+            uint32_t val32 = ((uint32_t)msb << 16) | (uint32_t)lsb;
+            double val = (double)val32;
             sensorUpdate(i, val);
             return true;
         }
@@ -877,113 +886,23 @@ bool getSensor(int cfgIdx)
         }
         break;
     case PORT_M701:
-        if (config.modbus_channel == 1)
-        {
-            modbus.begin(config.sensor[cfgIdx].address, Serial0);
-        }
-        else if (config.modbus_channel == 2)
-        {
-            modbus.begin(config.sensor[cfgIdx].address, Serial1);
-        }
-#if !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32C6)
-        else if (config.modbus_channel == 3)
-        {
-            modbus.begin(config.sensor[cfgIdx].address, Serial2);
-        }
-#endif
-        else
-        {
-            return false;
-        }
-        if (getM701Modbus(modbus))
+        if (getM701Modbus(config.sensor[cfgIdx].address))
             return true;
         break;
     case PORT_M702:
-        if (config.modbus_channel == 1)
-        {
-            modbus.begin(config.sensor[cfgIdx].address, Serial0);
-        }
-        else if (config.modbus_channel == 2)
-        {
-            modbus.begin(config.sensor[cfgIdx].address, Serial1);
-        }
-#if !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32C6)
-        else if (config.modbus_channel == 3)
-        {
-            modbus.begin(config.sensor[cfgIdx].address, Serial2);
-        }
-#endif
-        else
-        {
-            return false;
-        }
-        if (getM702Modbus(modbus))
+        if (getM702Modbus(config.sensor[cfgIdx].address))
             return true;
         break;
     case PORT_PZEM:
-        if (config.modbus_channel == 1)
-        {
-            modbus.begin(config.sensor[cfgIdx].address, Serial0);
-        }
-        else if (config.modbus_channel == 2)
-        {
-            modbus.begin(config.sensor[cfgIdx].address, Serial1);
-        }
-#if !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32C6)
-        else if (config.modbus_channel == 3)
-        {
-            modbus.begin(config.sensor[cfgIdx].address, Serial2);
-        }
-#endif
-        else
-        {
-            return false;
-        }
-        if (getPZEMModbus(modbus))
+        if (getPZEMModbus(config.sensor[cfgIdx].address))
             return true;
         break;
     case PORT_MODBUS_16:
-        if (config.modbus_channel == 1)
-        {
-            modbus.begin(config.sensor[cfgIdx].address/1000, Serial);
-        }
-        else if (config.modbus_channel == 2)
-        {
-            modbus.begin(config.sensor[cfgIdx].address/1000, Serial1);
-        }
-#if !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32C6)
-        else if (config.modbus_channel == 3)
-        {
-            modbus.begin(config.sensor[cfgIdx].address/1000, Serial2);
-        }
-#endif
-        else
-        {
-            return false;
-        }
-        if (getModbus16Bit(modbus,cfgIdx))
+        if (getModbus16Bit(config.sensor[cfgIdx].address / 1000, cfgIdx))
             return true;
         break;
     case PORT_MODBUS_32:
-        if (config.modbus_channel == 1)
-        {
-            modbus.begin(config.sensor[cfgIdx].address/1000, Serial);
-        }
-        else if (config.modbus_channel == 2)
-        {
-            modbus.begin(config.sensor[cfgIdx].address/1000, Serial1);
-        }
-#if !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32C6)
-        else if (config.modbus_channel == 3)
-        {
-            modbus.begin(config.sensor[cfgIdx].address/1000, Serial2);
-        }
-#endif
-        else
-        {
-            return false;
-        }
-        if (getModbus32Bit(modbus,cfgIdx))
+        if (getModbus32Bit(config.sensor[cfgIdx].address / 1000, cfgIdx))
             return true;
         break;
     case PORT_BME280_I2C0:

@@ -433,6 +433,8 @@ bool saveConfiguration(const char *filename, const Configuration &config)
     doc["modbusAddr"] = config.modbus_address;
     doc["modbusCh"] = config.modbus_channel;
     doc["modbusDE"] = config.modbus_de_gpio;
+    doc["modbusTcpHost"] = config.modbus_tcp_host;
+    doc["modbusTcpPort"] = config.modbus_tcp_port;
     // MOD Counter
     doc["cnt0En"] = config.counter0_enable;
     doc["cnt0Act"] = config.counter0_active;
@@ -933,6 +935,8 @@ bool loadConfiguration(const char *filename, Configuration &config)
         config.modbus_address = doc["modbusAddr"];
         config.modbus_channel = doc["modbusCh"];
         config.modbus_de_gpio = doc["modbusDE"];
+        strlcpy(config.modbus_tcp_host, doc["modbusTcpHost"] | "", sizeof(config.modbus_tcp_host));
+        config.modbus_tcp_port = doc["modbusTcpPort"] | 502;
         // MOD Counter
         config.counter0_enable = doc["cnt0En"];
         config.counter0_active = doc["cnt0Act"];

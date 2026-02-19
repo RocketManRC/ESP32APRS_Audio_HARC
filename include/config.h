@@ -375,6 +375,8 @@ typedef struct Config_Struct
 	uint8_t modbus_address = 0;
 	int8_t modbus_channel = -1;
 	int8_t modbus_de_gpio = -1;
+	char modbus_tcp_host[64] = "";
+	uint16_t modbus_tcp_port = 502;
 
 	bool counter0_enable = false;
 	bool counter0_active = 0;

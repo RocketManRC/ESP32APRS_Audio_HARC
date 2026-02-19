@@ -219,7 +219,7 @@ int getRawWx(char *strData)
             if(wgIdx>=(sizeof(wgArray)/4)) wgIdx=0;
             wgArray[wgIdx++]=windspeed;
             weather.windgust=0.0F;
-            for(int i;i<(sizeof(wgArray)/4);i++)
+            for(int i=0;i<(sizeof(wgArray)/4);i++)
             {
                 if(wgArray[i]>weather.windgust) weather.windgust=wgArray[i];
             }
@@ -306,7 +306,7 @@ int getRawWx(char *strData)
     if (config.wx_flage & WX_WIND_SPD)
     {
         if (weather.visable & WX_WIND_SPD)
-            sprintf(strtmp, "%03u", (unsigned int)round(weather.windspeed * 0.621));
+            sprintf(strtmp, "%03u", (unsigned int)round(weather.windspeed * 0.5399)); // kph to knots
         else
             sprintf(strtmp, "...");
     }
@@ -318,7 +318,7 @@ int getRawWx(char *strData)
 
     if ((weather.visable & WX_WIND_SPD) && (weather.visable & WX_WIND_GUST))
     {
-        sprintf(strtmp, "g%03u", (unsigned int)round(weather.windgust * 0.621));
+        sprintf(strtmp, "g%03u", (unsigned int)round(weather.windgust * 0.5399)); // kph to knots
     }
     else
     {

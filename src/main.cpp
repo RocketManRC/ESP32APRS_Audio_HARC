@@ -44,7 +44,8 @@
 #include <SoftwareSerial.h>
 // SoftwareSerial ss(-1, -1);
 
-#include <ModbusMaster.h>
+#include <ModbusClientRTU.h>
+#include <ModbusClientTCP.h>
 
 #include "handleATCommand.h"
 
@@ -137,8 +138,10 @@ ParseAPRS aprsParse;
 
 TinyGPSPlus gps;
 
-// instantiate ModbusMaster object
-ModbusMaster modbus;
+// eModbus clients (RTU for serial, TCP for network)
+ModbusClientRTU *modbusRTU = nullptr;
+WiFiClient modbusWiFiClient;
+ModbusClientTCP *modbusTCP = nullptr;
 
 // #ifdef __XTENSA__
 // #define BOOT_PIN 0
@@ -1848,6 +1851,8 @@ void defaultConfig()
     config.modbus_de_gpio = -1;
     config.modbus_address = 0;
     config.modbus_channel = 0;
+    memset(config.modbus_tcp_host, 0, sizeof(config.modbus_tcp_host));
+    config.modbus_tcp_port = 502;
 
     config.onewire_enable = false;
     config.onewire_gpio = -1;
@@ -3147,15 +3152,7 @@ long oledSleepTimeout = 0;
 bool showDisp = false;
 RTC_DATA_ATTR uint8_t curTab;
 
-void preTransmission()
-{
-    digitalWrite(config.modbus_de_gpio, 1);
-}
-
-void postTransmission()
-{
-    digitalWrite(config.modbus_de_gpio, 0);
-}
+// preTransmission/postTransmission no longer needed — eModbus handles DE pin natively
 
 #ifdef BLUETOOTH
 void bluetooth_init()
@@ -3411,30 +3408,37 @@ void setup()
     log_d("MODBUS config");
     if (config.modbus_enable)
     {
-        if (config.modbus_channel == 1)
+#if 0
+
+        if (config.modbus_channel >= 1 && config.modbus_channel <= 3)
         {
-            modbus.begin(config.modbus_address, Serial);
-        }
-        else if (config.modbus_channel == 2)
-        {
-            modbus.begin(config.modbus_address, Serial1);
-        }
-#ifdef __XTENSA__
-        else if (config.modbus_channel == 3)
-        {
-            modbus.begin(config.modbus_address, Serial2);
-        }
-#endif
-        if (config.modbus_channel > 0 && config.modbus_channel < 4)
-        {
-            // Modbus slave ID 1
+            // RTU mode: create client with optional DE pin
             if (config.modbus_de_gpio > -1)
-            {
-                pinMode(config.modbus_de_gpio, OUTPUT);
-                // Callbacks allow us to configure the RS485 transceiver correctly
-                modbus.preTransmission(preTransmission);
-                modbus.postTransmission(postTransmission);
-            }
+                modbusRTU = new ModbusClientRTU(config.modbus_de_gpio);
+            else
+                modbusRTU = new ModbusClientRTU();
+            modbusRTU->setTimeout(2000);
+
+            if (config.modbus_channel == 1)
+                modbusRTU->begin(Serial);
+            else if (config.modbus_channel == 2)
+                modbusRTU->begin(Serial1);
+#ifdef __XTENSA__
+            else if (config.modbus_channel == 3)
+                modbusRTU->begin(Serial2);
+#endif
+        }
+        else 
+#endif
+        if (config.modbus_channel == 4)
+        {
+            // TCP mode
+            modbusTCP = new ModbusClientTCP(modbusWiFiClient);
+            modbusTCP->setTimeout(2000);
+            IPAddress tcpAddr;
+            if (tcpAddr.fromString(config.modbus_tcp_host))
+                modbusTCP->setTarget(tcpAddr, config.modbus_tcp_port);
+            modbusTCP->begin();
         }
     }
 
