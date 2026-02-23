@@ -50,8 +50,8 @@ AsyncEventSource message_events("/eventMsg");
 String webString;
 
 extern unsigned long waitISRetry;
-extern int8_t adcEn;
-extern int8_t dacEn;
+extern volatile int8_t adcEn;
+extern volatile int8_t dacEn;
 extern unsigned long upTimeStamp;
 extern double VBat;
 extern bool VBat_Flag;
@@ -907,17 +907,13 @@ void handle_sysinfo(AsyncWebServerRequest *request)
 
 String event_lastHeard(bool gethtml)
 {
-	// log_d("Event count: %d",lastheard_events.count());
-	//if (lastheard_events.count() == 0)
-	//	return;
+	// Skip all the expensive HTML building if no SSE clients are connected
+	if(!gethtml && lastheard_events.count() == 0)
+		return "";
 
 	struct pbuf_t aprs;
 	ParseAPRS aprsParse;
 	struct tm tmstruct,tmNow;
-
-	// adcEn=-1;
-	// dacEn=-1;
-	// delay(20);
 
 	String html = "";
 	String line = "";
@@ -1123,26 +1119,30 @@ String event_lastHeard(bool gethtml)
 	// log_d("HTML Length=%d Byte",html.length());
 	if(gethtml) return html;
 	size_t len = html.length();
-	char *info = (char *)calloc(len+1, sizeof(char));
-	if (info)
+#ifdef BOARD_HAS_PSRAM
+	char *info = (char *)ps_calloc(len + 1, sizeof(char));
+#else
+	char *info = (char *)calloc(len + 1, sizeof(char));
+#endif
+	if(info)
 	{
-		memset(info,0,len+1);
-		html.toCharArray(info, len, 0);
+		html.toCharArray(info, len + 1, 0);
 		html.clear();
-		lastheard_events.send(info, "lastHeard", millis()/1000, 3000);
+		lastheard_events.send(info, "lastHeard", millis() / 1000, 3000);
 		free(info);
 	}
-	// lastheard_events.send(html.c_str(), "lastHeard", millis());
-	// adcEn=1;
-	// dacEn=0;
+	else
+	{
+		log_w("event_lastHeard: alloc failed (%d bytes)", len + 1);
+	}
 	return "";
 }
 
 String event_chatMessage(bool gethtml)
 {
-	// log_d("Event count: %d",lastheard_events.count());
-	// if (message_events.count() == 0)
-	//	return "NO";
+	// Skip all the expensive HTML building if no SSE clients are connected
+	if(!gethtml && message_events.count() == 0)
+		return "";
 
 	struct tm tmstruct, tmNow;
 
@@ -1227,18 +1227,24 @@ String event_chatMessage(bool gethtml)
 			html += "<td>" + String(pkg.msgID) + "</td></tr>";
 		}
 	}
-	log_d("HTML Length=%d Byte gethtml:%d event_cnt:%d", html.length(),gethtml,message_events.count());
+	log_d("HTML Length=%d Byte gethtml:%d event_cnt:%d", html.length(), gethtml, message_events.count());
 	if(gethtml) return html;
-	if (message_events.count() >0){
-		size_t len = html.length();
-		char *info = (char *)calloc(len, sizeof(char));
-		if (info)
-		{
-			html.toCharArray(info, len, 0);
-			html.clear();
-			message_events.send(info, "chatMsg", time(NULL), 5000);
-			free(info);
-		}	
+	size_t len = html.length();
+#ifdef BOARD_HAS_PSRAM
+	char *info = (char *)ps_calloc(len + 1, sizeof(char));
+#else
+	char *info = (char *)calloc(len + 1, sizeof(char));
+#endif
+	if(info)
+	{
+		html.toCharArray(info, len + 1, 0);
+		html.clear();
+		message_events.send(info, "chatMsg", time(NULL), 5000);
+		free(info);
+	}
+	else
+	{
+		log_w("event_chatMessage: alloc failed (%d bytes)", len + 1);
 	}
 	return "";
 }
@@ -9900,6 +9906,7 @@ void handle_wireless(AsyncWebServerRequest *request)
 //void handle_ws(String Raw,uint16_t mVrms)
 void handle_ws(char *Raw,size_t len,uint16_t mVrms)
 {
+	ws.cleanupClients();
 	if (ws.count() < 1)
 	return;
 

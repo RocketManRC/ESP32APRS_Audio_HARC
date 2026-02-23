@@ -27,11 +27,14 @@ Available environments: `esp32-s3-devkitc1-n8r2`, `esp32-s3-devkitc1-n16r8`, `es
 ### FreeRTOS Task Model
 
 The firmware runs concurrent FreeRTOS tasks defined in `src/main.cpp`:
-- **taskNetwork** — WiFi, APRS-IS connection, WireGuard VPN, PPPoS
-- **taskAPRS** / **taskAPRSPoll** — APRS packet processing, routing, and timing
-- **taskSerial** — Serial I/O for GPS, TNC, AT commands
-- **taskGPS** — GPS data parsing (TinyGPS++)
-- **taskSensor** — Sensor polling and data collection
+- **taskNetwork** — WiFi, APRS-IS connection, WireGuard VPN, PPPoS (core 1, priority 1)
+- **taskAPRS** — APRS packet processing, routing, TX/RX (core 1, priority 2)
+- **taskAPRSPoll** — Modem polling / audio sampling (core 1, priority 0)
+- **taskSerial** — Serial I/O for GPS, TNC, AT commands (core 0, priority 5)
+- **taskGPS** — GPS data parsing via TinyGPS++ (core 0, priority 4)
+- **taskSensor** — Sensor polling and data collection (core 0, priority 6)
+
+On ESP32-S3 (Xtensa dual-core), the APRS and network tasks share core 1 while utility tasks run on core 0. The AsyncWebServer (async_tcp) also runs on core 0, which means web request handlers execute on a different core than the APRS/network tasks.
 
 ### Key Source Files
 
@@ -77,6 +80,7 @@ Defined in `platformio.ini` per environment:
 - `PPPOS` — GSM/cellular modem
 - `MQTT` — MQTT client
 - `DEBUG` — Debug serial output
+- `CORE_DEBUG_LEVEL` — ESP-IDF log verbosity: 0=None, 1=Error, 2=Warn, 3=Info, 4=Debug, 5=Verbose. Set in `[env] build_flags`. Level 3 is recommended for normal use; level 4 enables `log_d()` (very chatty — 386 calls across codebase, may affect modem timing).
 
 ### Modbus Sensor Interface
 
@@ -115,6 +119,30 @@ The sensor monitor page (`/sensor`) auto-refreshes sensor values via a lightweig
 
 Other pages use similar patterns: sidebar info reloads every 10s via `/sidebarInfo`, system info every 60s via `/sysinfo`.
 
+**Dashboard SSE (Server-Sent Events):** The Last Heard table and Chat messages are pushed via `AsyncEventSource` endpoints `/eventHeard` and `/eventMsg`. The `event_lastHeard()` function builds a full HTML table (~10-30KB) from `pkgList[]` on each update. To avoid wasting CPU and memory when no browser is viewing the dashboard, both functions skip all work when `count() == 0` (no SSE clients connected). The HTML buffer allocation uses `ps_calloc` (PSRAM) to avoid fragmenting the limited internal SRAM. On initial SSE connect, the `onConnect` callback sends the current table immediately (`gethtml=true` path), so no data is lost when reopening the dashboard.
+
+### Dashboard DX Column
+
+The DX column on the dashboard (`/` route, `webservice.cpp`) shows distance and bearing to each station whose packet contains a position (`F_HASPOS`). Computed in `webservice.cpp:1071-1086`:
+
+1. **Local position** — uses GPS if valid, otherwise `config.igate_lat` / `config.igate_lon`
+2. **Distance** — Haversine formula in `ParseAPRS::distance()` (`parse_aprs.cpp:73-92`), result in km (Earth radius = 6366.71 km)
+3. **Bearing** — `ParseAPRS::direction()` (`parse_aprs.cpp:42-71`), aviation formula, result in degrees 0-360°
+4. **Display** — `{dist}km/{bearing}°` (e.g. `12.3km/045°`), or `-` if the packet has no position
+
+A **Filter DX** setting (`config.filterDistant`) on the dashboard config page limits displayed packets by distance (0 = no filter).
+
+### Serial Console / Debug Output
+
+On ESP32-S3 with `ARDUINO_USB_CDC_ON_BOOT=1`, `Serial` maps to **HWCDC** (native USB CDC). ESP-IDF log output (`log_e`/`log_w`/`log_i`/`log_d`) appears on both the native USB port and the COM port (UART0 via USB-UART bridge). Use either port for monitoring at 115200 baud.
+
+**UART initialization:** Serial0/1/2 are guarded by `config.uartN_enable && config.uartN_baudrate > 0`. Without this guard, a baud rate of 0 triggers auto-detect which spams `Could not detect baudrate` errors.
+
+**Status monitoring:** `taskNetwork` logs a `[STATUS]` line every 60 seconds with uptime, free heap (internal + PSRAM), WiFi state, and RX/TX packet counts. Watch for:
+- Declining `heap` values → memory leak
+- `wifi=0` → WiFi disconnection
+- `rxCount` stops incrementing → packet processing stalled
+
 ### Startup Timing
 
 Boot to WiFi-responsive takes ~7-25 seconds. The main delays in order:
@@ -142,6 +170,45 @@ If BOOT is held during this window, the LED flashes white (factory reset mode).
 LED control is in `LED_Status2()` in `lib/LibAPRS_ESP32/AFSK.cpp`, called from `setPtt()` (TX) and `setDcd()` in `modem.cpp` (RX). A 100ms rate-limit prevents NeoPixel flickering. Note: without an audio input or squelch signal, ADC noise can cause false DCD (green LED on intermittently) — this is normal modem behavior, not a bug.
 
 Fallback for boards without NeoPixel: red LED on GPIO 4 (TX), green LED on GPIO 2 (RX).
+
+### Shared Data and Concurrency
+
+The `pkgList` (received packet history) and `txQueue` (TX packet queue) arrays are accessed from multiple tasks and from AsyncWebServer handlers running on different cores. Access is protected by a FreeRTOS mutex (`psramMutex`) in `src/main.cpp`:
+
+- **`psramLock(timeout)`** — acquires mutex, default `portMAX_DELAY` (wait forever)
+- **`psramUnlock()`** — releases mutex
+- Mutex created in `setup()` via `xSemaphoreCreateMutex()` before task creation
+
+Functions that hold the mutex: `getPkgList()`, `pkgListUpdate()`, `pkgTxPush()`, `pkgTxSend()`, `pkgTxDuplicate()`, `sort()`, `sortPkgDesc()`, and in `message.cpp`: `pkgMsgSort()`, `getMsgList()`, `pkgMsgUpdate()`.
+
+**Important:** `pkgTxSend()` intentionally releases the mutex before both RF transmission (`APRS_sendTNC2Pkt`) and INET transmission (`aprsClient.write`) and re-acquires afterward, to avoid holding the lock during slow I/O. The INET path copies packet data to a local buffer before releasing the lock.
+
+The `event_lastHeard()` function in `webservice.cpp` calls `getPkgList()` up to `PKGLISTSIZE` times (30 on PSRAM boards) to build the dashboard HTML. It runs from both taskNetwork (SSE push every ~1s) and AsyncWebServer handlers (SSE client connect on core 0).
+
+### TX/RX Mode Switching
+
+The modem switches between RX (ADC sampling) and TX (DAC output) modes. The ADC path differs by chip:
+
+**ESP32 vs ESP32-S3 ADC paths** (`AFSK.cpp`):
+- **ESP32** (`ADC_SAMPLE` defined): Timer-based `sample_adc_isr()` pushes to FIFO, gated by `if(!hw_afsk_dac_isr)`. `AFSK_TimerEnable()` starts/stops the timer.
+- **ESP32-S3** (`ADC_SAMPLE` not defined): DMA-based `s_conv_done_cb()` callback from `adc_continuous` driver. `AFSK_TimerEnable()` is a no-op (code commented out in `#else` branch). The callback is gated by `if(hw_afsk_dac_isr) return true;` to prevent FIFO fill during TX.
+
+**`ModemTransmitStart()`** (task context): Calls `setPtt(true)`, sets `hw_afsk_dac_isr = true` (gates ADC FIFO fill), stops ADC timer via `AFSK_TimerEnable(false)`, starts DAC timer.
+
+**`ModemTransmitStop()`** (DAC timer ISR context, called from `Ax25GetTxBit()`):
+1. Stops DAC timer
+2. Flushes FIFO via `AFSK_FlushFifo()` (discards stale samples while gate is still closed)
+3. Clears `hw_afsk_dac_isr` (re-enables ADC FIFO filling)
+4. Calls `AFSK_TimerEnable(true)` (restarts ADC timer on ESP32, no-op on S3)
+5. Sets `pttOff = true` for deferred PTT release
+
+**Deferred PTT pattern:** `setPtt(false)` cannot be called from ISR context because it triggers `LED_Status2()` → `strip->show()` (NeoPixel RMT write), which overflows the ISR stack. Instead, `ModemTransmitStop()` sets `volatile bool pttOff = true`, and the `taskAPRS` loop picks this up within 10ms to call `setPtt(false)` from task context.
+
+The shared flags `adcEn`, `dacEn` (`volatile int8_t`), `hw_afsk_dac_isr`, and `pttOff` (`volatile bool`) are declared in `AFSK.cpp` and **must** be `volatile` since they're written from ISR context and read from task context.
+
+### RX Frame Buffer
+
+The modem stores decoded frames in a small circular buffer in `lib/LibAPRS_ESP32/AX25.cpp` (`FRAME_MAX_COUNT`: 10 on ESP32-S3, 5 on others). If `taskAPRS` doesn't consume frames fast enough, new frames are dropped with `log_w("RX frame buffer full")`. The green DCD LED will still flash since carrier detection is independent of frame buffering.
 
 ### Partition Tables
 

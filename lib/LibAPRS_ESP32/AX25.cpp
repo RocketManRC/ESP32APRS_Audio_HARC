@@ -35,9 +35,9 @@ struct Ax25ProtoConfig Ax25Config;
 #endif
 
 #ifdef CONFIG_IDF_TARGET_ESP32S3
-#define FRAME_MAX_COUNT (5) //max count of frames in buffer
+#define FRAME_MAX_COUNT (10) //max count of frames in buffer
 #else
-#define FRAME_MAX_COUNT (3) //max count of frames in buffer
+#define FRAME_MAX_COUNT (5) //max count of frames in buffer
 #endif
 #define FRAME_BUFFER_SIZE (FRAME_MAX_COUNT * AX25_FRAME_MAX_SIZE) //circular frame buffer length
 
@@ -67,6 +67,7 @@ static uint16_t rxBufferHead = 0; //circular RX buffer write index
 static struct FrameHandle rxFrame[FRAME_MAX_COUNT];
 static uint8_t rxFrameHead = 0;
 static uint8_t rxFrameTail = 0;
+volatile uint32_t frameDecodeCount = 0; // Diagnostic: counts frames stored in rxFrame buffer
 static bool rxFrameBufferFull = false;
 
 static uint8_t txBuffer[FRAME_BUFFER_SIZE];  //circular TX frame buffer
@@ -705,6 +706,7 @@ void Ax25BitParse(uint8_t bit, uint8_t modem,uint16_t mV)
 									//__disable_irq();
 									rxFrame[rxFrameHead++].size = rx->frameIdx;
 									rxFrameHead %= FRAME_MAX_COUNT;
+									frameDecodeCount++;
 									if(rxFrameHead == rxFrameTail)
 										rxFrameBufferFull = true;
 									//__enable_irq();

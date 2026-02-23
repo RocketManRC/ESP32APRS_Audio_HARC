@@ -294,19 +294,19 @@ void I2S_Init(i2s_mode_t MODE, i2s_bits_per_sample_t BPS);
 // #define MARK_INC (uint16_t)(DIV_ROUND(SIN_LEN * (uint32_t)mark_freq, CONFIG_AFSK_DAC_SAMPLERATE))
 // #define SPACE_INC (uint16_t)(DIV_ROUND(SIN_LEN * (uint32_t)space_freq, CONFIG_AFSK_DAC_SAMPLERATE))
 
-#define AFSK_DAC_IRQ_START()         \
-    do                               \
-    {                                \
-        extern bool hw_afsk_dac_isr; \
-        hw_afsk_dac_isr = true;      \
-        digitalWrite(LED_TX_PIN,HIGH);\
+#define AFSK_DAC_IRQ_START()                  \
+    do                                        \
+    {                                         \
+        extern volatile bool hw_afsk_dac_isr; \
+        hw_afsk_dac_isr = true;               \
+        digitalWrite(LED_TX_PIN,HIGH);        \
     } while (0)
-#define AFSK_DAC_IRQ_STOP()          \
-    do                               \
-    {                                \
-        extern bool hw_afsk_dac_isr; \
-        hw_afsk_dac_isr = false;     \
-        digitalWrite(LED_TX_PIN,LOW);\
+#define AFSK_DAC_IRQ_STOP()                   \
+    do                                        \
+    {                                         \
+        extern volatile bool hw_afsk_dac_isr; \
+        hw_afsk_dac_isr = false;              \
+        digitalWrite(LED_TX_PIN,LOW);         \
     } while (0)
 //#define AFSK_DAC_INIT()        do { DAC_DDR |= (DAC_PINS) ; PTT_DDR = 0b01000000;} while (0)
 
