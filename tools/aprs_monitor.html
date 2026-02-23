@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>APRS-IS Monitor</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            padding: 16px;
+            font-size: 14px;
+        }
+        h1 {
+            font-size: 20px;
+            color: #64b5f6;
+            margin-bottom: 12px;
+        }
+        .controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+        label { color: #90a4ae; font-size: 13px; }
+        input[type="text"] {
+            background: #16213e;
+            border: 1px solid #334;
+            color: #e0e0e0;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 14px;
+            width: 140px;
+        }
+        input[type="text"]:focus { outline: none; border-color: #64b5f6; }
+        select {
+            background: #16213e;
+            border: 1px solid #334;
+            color: #e0e0e0;
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        button {
+            padding: 6px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .btn-connect { background: #2e7d32; color: white; }
+        .btn-connect:hover { background: #388e3c; }
+        .btn-disconnect { background: #c62828; color: white; }
+        .btn-disconnect:hover { background: #d32f2f; }
+        .btn-clear { background: #455a64; color: white; }
+        .btn-clear:hover { background: #546e7a; }
+        .status {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status-disconnected { background: #424242; color: #999; }
+        .status-connecting { background: #e65100; color: white; }
+        .status-connected { background: #1b5e20; color: #a5d6a7; }
+        .status-error { background: #b71c1c; color: #ef9a9a; }
+        .stats {
+            color: #78909c;
+            font-size: 12px;
+            margin-left: auto;
+        }
+        .options {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 12px;
+            align-items: center;
+        }
+        .options label {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+        }
+        #packets {
+            border: 1px solid #334;
+            border-radius: 4px;
+            background: #16213e;
+            overflow-y: auto;
+            max-height: calc(100vh - 180px);
+        }
+        .packet {
+            padding: 8px 12px;
+            border-bottom: 1px solid #1a1a2e;
+            line-height: 1.4;
+        }
+        .packet:hover { background: #1a2540; }
+        .packet-header {
+            display: flex;
+            gap: 8px;
+            align-items: baseline;
+            flex-wrap: wrap;
+        }
+        .packet-time { color: #78909c; font-size: 12px; min-width: 70px; }
+        .packet-from { color: #64b5f6; font-weight: 600; }
+        .packet-to { color: #78909c; font-size: 12px; }
+        .packet-type {
+            font-size: 11px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-weight: 600;
+        }
+        .type-weather { background: #1a237e; color: #82b1ff; }
+        .type-position { background: #004d40; color: #80cbc4; }
+        .type-message { background: #4a148c; color: #ce93d8; }
+        .type-telemetry { background: #bf360c; color: #ffab91; }
+        .type-status { background: #33691e; color: #aed581; }
+        .type-object { background: #4e342e; color: #bcaaa4; }
+        .type-other { background: #37474f; color: #90a4ae; }
+        .packet-data { margin-top: 4px; font-size: 13px; }
+        .packet-data .field { color: #b0bec5; }
+        .packet-data .value { color: #fff; }
+        .packet-data .unit { color: #78909c; font-size: 12px; }
+        .packet-raw {
+            margin-top: 4px;
+            font-size: 11px;
+            color: #546e7a;
+            word-break: break-all;
+        }
+        .empty-msg {
+            text-align: center;
+            padding: 40px;
+            color: #546e7a;
+        }
+        .server-msg {
+            padding: 4px 12px;
+            color: #546e7a;
+            font-size: 12px;
+            border-bottom: 1px solid #1a1a2e;
+        }
+    </style>
+</head>
+<body>
+    <h1>APRS-IS Packet Monitor</h1>
+    <div class="controls">
+        <label>Callsign:</label>
+        <input type="text" id="callsign" placeholder="e.g. VE7ABC" value="">
+        <label>Filter:</label>
+        <select id="filterType">
+            <option value="b">Buddy (exact)</option>
+            <option value="p">Prefix</option>
+            <option value="r">Range</option>
+        </select>
+        <input type="text" id="filterExtra" placeholder="range: lat/lon/km" style="display:none; width:180px;">
+        <label>Server:</label>
+        <select id="server">
+            <option value="auto">Auto-detect</option>
+            <option value="wss://ametx.com:8888/">WSS (ametx.com)</option>
+            <option value="ws://srvr.aprs-is.net:8080/">WS (aprs-is.net)</option>
+        </select>
+        <button id="connectBtn" class="btn-connect" onclick="toggleConnection()">Connect</button>
+        <button class="btn-clear" onclick="clearPackets()">Clear</button>
+        <span id="status" class="status status-disconnected">Disconnected</span>
+        <span id="stats" class="stats"></span>
+    </div>
+    <div class="options">
+        <label>Type:</label>
+        <select id="typeFilter">
+            <option value="all">All</option>
+            <option value="weather">Weather</option>
+            <option value="position">Position</option>
+            <option value="message">Message</option>
+            <option value="telemetry">Telemetry</option>
+            <option value="status">Status</option>
+            <option value="object">Object/Item</option>
+            <option value="other">Other</option>
+        </select>
+        <label><input type="checkbox" id="showRaw"> Show raw packets</label>
+        <label><input type="checkbox" id="showServer"> Show server messages</label>
+        <label><input type="checkbox" id="autoScroll" checked> Auto-scroll</label>
+    </div>
+    <div id="packets">
+        <div class="empty-msg">Enter a callsign and click Connect to start monitoring APRS-IS packets.</div>
+    </div>
+
+<script>
+let ws = null;
+let packetCount = 0;
+let startTime = null;
+
+const filterType = document.getElementById('filterType');
+const filterExtra = document.getElementById('filterExtra');
+filterType.addEventListener('change', function() {
+    filterExtra.style.display = this.value === 'r' ? 'inline-block' : 'none';
+    filterExtra.placeholder = 'lat/lon/km e.g. 49.25/-123.1/50';
+});
+
+function setStatus(state, text) {
+    const el = document.getElementById('status');
+    el.className = 'status status-' + state;
+    el.textContent = text;
+}
+
+function updateStats() {
+    if(!startTime) return;
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const h = Math.floor(elapsed / 3600);
+    const m = Math.floor((elapsed % 3600) / 60);
+    const s = elapsed % 60;
+    const time = h > 0 ? h + 'h ' + m + 'm' : m + 'm ' + s + 's';
+    document.getElementById('stats').textContent = packetCount + ' packets | ' + time;
+}
+
+function toggleConnection() {
+    if(ws && ws.readyState <= 1) {
+        ws.close();
+    } else {
+        connect();
+    }
+}
+
+function connect() {
+    const call = document.getElementById('callsign').value.trim().toUpperCase();
+    if(!call) {
+        alert('Please enter a callsign');
+        return;
+    }
+
+    let filter;
+    const ft = filterType.value;
+    if(ft === 'b') {
+        filter = 'b/' + call;
+    } else if(ft === 'p') {
+        filter = 'p/' + call;
+    } else if(ft === 'r') {
+        const extra = filterExtra.value.trim();
+        if(!extra) {
+            alert('Please enter lat/lon/km for range filter');
+            return;
+        }
+        filter = 'r/' + extra;
+    }
+
+    setStatus('connecting', 'Connecting...');
+    document.getElementById('connectBtn').className = 'btn-disconnect';
+    document.getElementById('connectBtn').textContent = 'Disconnect';
+
+    let serverUrl;
+    const serverSel = document.getElementById('server').value;
+    if(serverSel === 'auto') {
+        serverUrl = location.protocol === 'https:' ?
+            'wss://ametx.com:8888/' : 'ws://srvr.aprs-is.net:8080/';
+    } else {
+        serverUrl = serverSel;
+    }
+
+    try {
+        ws = new WebSocket(serverUrl);
+        ws.binaryType = 'arraybuffer';
+    } catch(e) {
+        setStatus('error', 'WebSocket error');
+        resetButton();
+        return;
+    }
+
+    ws.onopen = function() {
+        const login = 'user ' + call + ' pass -1 vers APRSMonitor 1.0 filter ' + filter + '\r\n';
+        ws.send(login);
+        setStatus('connected', 'Connected');
+        packetCount = 0;
+        startTime = Date.now();
+        updateStats();
+    };
+
+    ws.onmessage = function(event) {
+        const decoder = new TextDecoder('latin1');
+        const line = decoder.decode(event.data).trim();
+        if(!line) return;
+
+        if(line.startsWith('#')) {
+            if(document.getElementById('showServer').checked) {
+                addServerMessage(line);
+            }
+            return;
+        }
+
+        packetCount++;
+        updateStats();
+        addPacket(line);
+    };
+
+    ws.onclose = function() {
+        setStatus('disconnected', 'Disconnected');
+        resetButton();
+    };
+
+    ws.onerror = function() {
+        setStatus('error', 'Connection error');
+        resetButton();
+    };
+}
+
+function resetButton() {
+    document.getElementById('connectBtn').className = 'btn-connect';
+    document.getElementById('connectBtn').textContent = 'Connect';
+    ws = null;
+}
+
+function clearPackets() {
+    document.getElementById('packets').innerHTML = '';
+    packetCount = 0;
+    startTime = startTime ? Date.now() : null;
+    updateStats();
+}
+
+function addServerMessage(line) {
+    const container = document.getElementById('packets');
+    removeEmpty(container);
+    const div = document.createElement('div');
+    div.className = 'server-msg';
+    div.textContent = line;
+    container.appendChild(div);
+    autoScroll(container);
+}
+
+function addPacket(raw) {
+    const container = document.getElementById('packets');
+    removeEmpty(container);
+
+    const parsed = parsePacket(raw);
+    const typeFilter = document.getElementById('typeFilter').value;
+    if(typeFilter !== 'all' && parsed.type !== typeFilter) return;
+
+    const div = document.createElement('div');
+    div.className = 'packet';
+
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-US', { hour12: false });
+
+    let html = '<div class="packet-header">';
+    html += '<span class="packet-time">' + timeStr + '</span>';
+    html += '<span class="packet-from">' + escHtml(parsed.from) + '</span>';
+    html += '<span class="packet-to">&rarr; ' + escHtml(parsed.to) + '</span>';
+    html += '<span class="packet-type type-' + parsed.type + '">' + parsed.typeLabel + '</span>';
+    html += '</div>';
+
+    if(parsed.decoded) {
+        html += '<div class="packet-data">' + parsed.decoded + '</div>';
+    }
+
+    if(document.getElementById('showRaw').checked) {
+        html += '<div class="packet-raw">' + escHtml(raw) + '</div>';
+    }
+
+    div.innerHTML = html;
+    container.appendChild(div);
+    autoScroll(container);
+}
+
+function removeEmpty(container) {
+    const empty = container.querySelector('.empty-msg');
+    if(empty) empty.remove();
+}
+
+function autoScroll(container) {
+    if(document.getElementById('autoScroll').checked) {
+        container.scrollTop = container.scrollHeight;
+    }
+}
+
+function escHtml(s) {
+    const div = document.createElement('div');
+    div.textContent = s;
+    return div.innerHTML;
+}
+
+// --- APRS Packet Parser ---
+
+function parsePacket(raw) {
+    const result = { from: '', to: '', path: '', type: 'other', typeLabel: 'Other', decoded: '', data: '' };
+
+    // Split header and data: FROM>TO,PATH:DATA
+    const colonIdx = raw.indexOf(':');
+    if(colonIdx < 0) {
+        result.from = raw;
+        return result;
+    }
+
+    const header = raw.substring(0, colonIdx);
+    const data = raw.substring(colonIdx + 1);
+    result.data = data;
+
+    const gtIdx = header.indexOf('>');
+    if(gtIdx < 0) {
+        result.from = header;
+        return result;
+    }
+
+    result.from = header.substring(0, gtIdx);
+    const destPath = header.substring(gtIdx + 1);
+    const parts = destPath.split(',');
+    result.to = parts[0] || '';
+    result.path = parts.slice(1).join(',');
+
+    if(!data.length) return result;
+
+    const dataType = data.charAt(0);
+
+    // Position with timestamp
+    if(dataType === '@' || dataType === '/') {
+        return parsePosition(result, data, true);
+    }
+    // Position without timestamp
+    if(dataType === '!' || dataType === '=') {
+        return parsePosition(result, data, false);
+    }
+    // Positionless weather
+    if(dataType === '_') {
+        result.type = 'weather';
+        result.typeLabel = 'Weather';
+        result.decoded = decodeWeather(data.substring(9)); // skip _MMDDHHMM
+        return result;
+    }
+    // Message
+    if(dataType === ':') {
+        return parseMessage(result, data);
+    }
+    // Status
+    if(dataType === '>') {
+        result.type = 'status';
+        result.typeLabel = 'Status';
+        result.decoded = field('Status', data.substring(1));
+        return result;
+    }
+    // Telemetry
+    if(data.startsWith('T#')) {
+        result.type = 'telemetry';
+        result.typeLabel = 'Telemetry';
+        result.decoded = field('Data', data);
+        return result;
+    }
+    // Object
+    if(dataType === ';') {
+        result.type = 'object';
+        result.typeLabel = 'Object';
+        result.decoded = field('Object', data.substring(1));
+        return result;
+    }
+    // Item
+    if(dataType === ')') {
+        result.type = 'object';
+        result.typeLabel = 'Item';
+        result.decoded = field('Item', data.substring(1));
+        return result;
+    }
+
+    result.decoded = field('Data', data);
+    return result;
+}
+
+function parsePosition(result, data, hasTimestamp) {
+    let pos = data.substring(1); // skip type char
+
+    if(hasTimestamp) {
+        // Timestamp is 7 chars: DDHHMMz or HHMMSSh or DDHHMMl
+        if(pos.length >= 7) {
+            pos = pos.substring(7);
+        }
+    }
+
+    // Uncompressed position: DDMM.MM[M]N/DDDMM.MM[M]W_ (2 or 3 decimal places)
+    // Use regex to handle varying precision reliably
+    let lat = '', lon = '', symbol = '', rest = '';
+    const posMatch = pos.match(/^(\d{4}\.\d{2,3})([NS])(.)(\d{5}\.\d{2,3})([EW])(.)(.*)$/s);
+
+    if(posMatch) {
+        lat = parseLatitude(posMatch[1], posMatch[2]);
+        const symTable = posMatch[3];
+        lon = parseLongitude(posMatch[4], posMatch[5]);
+        symbol = symTable + posMatch[6];
+        rest = posMatch[7];
+    } else {
+        // Compressed or other format — show raw
+        result.type = 'position';
+        result.typeLabel = 'Position';
+        result.decoded = field('Data', data);
+        return result;
+    }
+
+    // Check if weather data follows (symbol is /_)
+    if(symbol === '/_' || rest.match(/^[0-9.]{3}\/[0-9.]{3}g/)) {
+        result.type = 'weather';
+        result.typeLabel = 'Weather';
+        let decoded = field('Pos', lat + ', ' + lon);
+        decoded += decodeWeather(rest);
+        result.decoded = decoded;
+    } else {
+        result.type = 'position';
+        result.typeLabel = 'Position';
+        let decoded = field('Pos', lat + ', ' + lon);
+        // Course/speed or PHG or altitude in rest
+        if(rest) {
+            const csMatch = rest.match(/^(\d{3})\/(\d{3})/);
+            if(csMatch) {
+                const course = parseInt(csMatch[1]);
+                const speed = parseInt(csMatch[2]);
+                if(course > 0 || speed > 0) {
+                    decoded += field('Course', course + '\u00b0') + field('Speed', speed + ' mph');
+                }
+                rest = rest.substring(7);
+            }
+            if(rest.match(/^\/A=[-\d]{6}/)) {
+                const alt = parseInt(rest.substring(3, 9));
+                decoded += field('Alt', alt + ' ft');
+                rest = rest.substring(9);
+            }
+            if(rest) {
+                decoded += field('Comment', rest);
+            }
+        }
+        result.decoded = decoded;
+    }
+
+    return result;
+}
+
+function parseMessage(result, data) {
+    result.type = 'message';
+    result.typeLabel = 'Message';
+    // :ADDRESSEE:message text{msgno
+    const msgData = data.substring(1);
+    const addrEnd = msgData.indexOf(':');
+    if(addrEnd >= 0) {
+        const addressee = msgData.substring(0, addrEnd).trim();
+        let msgText = msgData.substring(addrEnd + 1);
+        let msgNo = '';
+        const braceIdx = msgText.lastIndexOf('{');
+        if(braceIdx >= 0) {
+            msgNo = msgText.substring(braceIdx + 1);
+            msgText = msgText.substring(0, braceIdx);
+        }
+        result.decoded = field('To', addressee) + field('Msg', msgText);
+        if(msgNo) result.decoded += field('#', msgNo);
+    } else {
+        result.decoded = field('Data', msgData);
+    }
+    return result;
+}
+
+function decodeWeather(s) {
+    let decoded = '';
+    // Wind direction/speed: NNN/NNN
+    const windMatch = s.match(/^(\d{3}|\.{3})\/(\d{3}|\.{3})/);
+    if(windMatch) {
+        if(windMatch[1] !== '...' && windMatch[1] !== '000') {
+            decoded += field('Wind', windMatch[1] + '\u00b0');
+        }
+        if(windMatch[2] !== '...') {
+            const mph = parseInt(windMatch[2]);
+            decoded += field('Speed', mph + ' mph / ' + (mph * 1.609).toFixed(1) + ' km/h');
+        }
+        s = s.substring(7);
+    }
+
+    // Gust
+    const gustMatch = s.match(/g(\d{3}|\.{3})/);
+    if(gustMatch && gustMatch[1] !== '...') {
+        const mph = parseInt(gustMatch[1]);
+        decoded += field('Gust', mph + ' mph / ' + (mph * 1.609).toFixed(1) + ' km/h');
+    }
+
+    // Temperature
+    const tempMatch = s.match(/t(-?\d{2,3}|\.{3})/);
+    if(tempMatch && tempMatch[1] !== '...') {
+        const f = parseInt(tempMatch[1]);
+        const c = ((f - 32) * 5 / 9).toFixed(1);
+        decoded += field('Temp', f + '\u00b0F / ' + c + '\u00b0C');
+    }
+
+    // Rain last hour
+    const rainMatch = s.match(/r(\d{3}|\.{3})/);
+    if(rainMatch && rainMatch[1] !== '...' && rainMatch[1] !== '000') {
+        decoded += field('Rain 1h', (parseInt(rainMatch[1]) / 100).toFixed(2) + ' in');
+    }
+
+    // Rain 24h
+    const rain24Match = s.match(/p(\d{3}|\.{3})/);
+    if(rain24Match && rain24Match[1] !== '...' && rain24Match[1] !== '000') {
+        decoded += field('Rain 24h', (parseInt(rain24Match[1]) / 100).toFixed(2) + ' in');
+    }
+
+    // Rain since midnight
+    const rainMidMatch = s.match(/P(\d{3}|\.{3})/);
+    if(rainMidMatch && rainMidMatch[1] !== '...' && rainMidMatch[1] !== '000') {
+        decoded += field('Rain today', (parseInt(rainMidMatch[1]) / 100).toFixed(2) + ' in');
+    }
+
+    // Humidity
+    const humMatch = s.match(/h(\d{2}|\.{2})/);
+    if(humMatch && humMatch[1] !== '..') {
+        const h = parseInt(humMatch[1]);
+        decoded += field('Humidity', (h === 0 ? 100 : h) + '%');
+    }
+
+    // Barometric pressure
+    const baroMatch = s.match(/b(\d{5}|\.{5})/);
+    if(baroMatch && baroMatch[1] !== '.....') {
+        decoded += field('Baro', (parseInt(baroMatch[1]) / 10).toFixed(1) + ' hPa');
+    }
+
+    // Luminosity
+    const lumMatch = s.match(/[lL](\d{3})/);
+    if(lumMatch) {
+        let lum = parseInt(lumMatch[1]);
+        if(s.match(/L\d{3}/)) lum += 1000; // L = luminosity + 1000
+        decoded += field('Lum', lum + ' W/m\u00b2');
+    }
+
+    // Snow
+    const snowMatch = s.match(/s(\d{3}|\.{3})/);
+    // Avoid matching wind speed 's' — snow appears after other wx fields
+    if(snowMatch && snowMatch[1] !== '...' && s.indexOf('s' + snowMatch[1]) > 7) {
+        decoded += field('Snow', (parseInt(snowMatch[1]) / 10).toFixed(1) + ' in');
+    }
+
+    return decoded;
+}
+
+function parseLatitude(dmm, dir) {
+    // dmm = "DDMM.MM" or "DDMM.MMM", dir = "N" or "S"
+    const deg = parseInt(dmm.substring(0, 2));
+    const min = parseFloat(dmm.substring(2));
+    let val = deg + min / 60;
+    if(dir === 'S') val = -val;
+    return val.toFixed(5);
+}
+
+function parseLongitude(dmm, dir) {
+    // dmm = "DDDMM.MM" or "DDDMM.MMM", dir = "E" or "W"
+    const deg = parseInt(dmm.substring(0, 3));
+    const min = parseFloat(dmm.substring(3));
+    let val = deg + min / 60;
+    if(dir === 'W') val = -val;
+    return val.toFixed(5);
+}
+
+function field(name, value) {
+    return ' <span class="field">' + escHtml(name) + ':</span> <span class="value">' + escHtml(String(value)) + '</span>';
+}
+
+// Update stats every second
+setInterval(updateStats, 1000);
+</script>
+</body>
+</html>

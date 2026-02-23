@@ -214,6 +214,29 @@ The modem stores decoded frames in a small circular buffer in `lib/LibAPRS_ESP32
 
 Custom partition CSVs in project root (`flash_default_8MB.csv`, `flash_default_16MB.csv`, `flash_default_32MB.csv`) with dual OTA slots and SPIFFS.
 
+### APRS-IS Packet Monitor
+
+A standalone HTML page (`tools/aprs_monitor.html`) for monitoring APRS-IS packets in a browser. No backend required — connects directly via WebSocket.
+
+**How it works:**
+- Connects to APRS-IS WebSocket servers (`ws://srvr.aprs-is.net:8080/` or `wss://ametx.com:8888/`)
+- Auto-detects HTTP vs HTTPS and selects the appropriate server (WS for local/HTTP, WSS for HTTPS hosting)
+- Logs in read-only (`pass -1`) with a server-side filter for the configured callsign
+- Parses raw TNC2-format APRS packets in JavaScript and displays decoded fields
+
+**Features:**
+- Filter modes: Buddy (exact callsign), Prefix, or Range (lat/lon/km)
+- Packet type filter: All, Weather, Position, Message, Telemetry, Status, Object/Item
+- Decodes weather packets: wind dir/speed/gust (mph + km/h), temperature (F + C), rain, humidity, barometric pressure, luminosity
+- Decodes position packets: lat/lon (decimal degrees with sign convention), course, speed, altitude
+- Decodes messages: addressee, text, message number
+- Toggle raw packet display, server messages, auto-scroll
+- Packet counter and elapsed time
+
+**Position parsing:** Uses regex to handle both 2 and 3 decimal place APRS coordinates (`DDMM.MM` or `DDMM.MMM` for latitude, `DDDMM.MM` or `DDDMM.MMM` for longitude). Positions display as signed decimal degrees (negative = South/West).
+
+**Hosting:** Can be opened locally (double-click) or hosted on any web server. For HTTPS sites, the page auto-selects the WSS server to avoid mixed-content blocking.
+
 ## Important Notes
 
 - `main.cpp` and `webservice.cpp` are very large files (400KB+). Read specific sections rather than the entire file.
