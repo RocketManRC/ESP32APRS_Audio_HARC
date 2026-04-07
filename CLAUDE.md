@@ -10,7 +10,7 @@ ESP32APRS Audio HARC is an APRS (Automatic Packet Reporting System) firmware for
 
 ## Build Commands
 
-This is a PlatformIO project. The default build environment is `esp32-s3-devkitc1-n8r2`.
+This is a PlatformIO project. The default build environment is `esp32-s3-devkitc1-n16r8`.
 
 ```bash
 pio run                          # Build (default env)
@@ -206,6 +206,14 @@ The modem switches between RX (ADC sampling) and TX (DAC output) modes. The ADC 
 
 The shared flags `adcEn`, `dacEn` (`volatile int8_t`), `hw_afsk_dac_isr`, and `pttOff` (`volatile bool`) are declared in `AFSK.cpp` and **must** be `volatile` since they're written from ISR context and read from task context.
 
+### ADC FIFO Ring Buffer Synchronization
+
+The ADC sample FIFO (`fifo` in `AFSK.cpp`) is a 1500-sample ring buffer shared between the ADC DMA ISR (`s_conv_done_cb` on ESP32-S3, `sample_adc_isr` on ESP32) and `AFSK_Poll()` running in `taskAPRSPoll`.
+
+**Critical fix (April 2026):** `RingBuffer_Pop()` now uses `portENTER_CRITICAL(&timerMux)` to synchronize with the ISR's `portENTER_CRITICAL_ISR(&timerMux)`. Previously, Pop used only a boolean `lock` busy-wait, leaving `fifo.count--` unprotected. The ISR could preempt between read and write of `count`, causing the task's decrement to overwrite the ISR's increment. Over 60-90 minutes, the count drifted from reality, the ring buffer overflowed (head lapped tail), and the demodulator processed jumbled audio — triggering false DCD (green LED flickering) while producing no valid frames (dashboard freeze). TX temporarily cleared the symptom because `ModemTransmitStop()` calls `AFSK_FlushFifo()` which resets `head=tail=count=0`.
+
+The ISR also now drops samples when `fifo.count >= BUFFER_SIZE` (overflow protection) instead of overwriting unread data.
+
 ### RX Frame Buffer
 
 The modem stores decoded frames in a small circular buffer in `lib/LibAPRS_ESP32/AX25.cpp` (`FRAME_MAX_COUNT`: 10 on ESP32-S3, 5 on others). If `taskAPRS` doesn't consume frames fast enough, new frames are dropped with `log_w("RX frame buffer full")`. The green DCD LED will still flash since carrier detection is independent of frame buffering.
@@ -236,6 +244,24 @@ A standalone HTML page (`tools/aprs_monitor.html`) for monitoring APRS-IS packet
 **Position parsing:** Uses regex to handle both 2 and 3 decimal place APRS coordinates (`DDMM.MM` or `DDMM.MMM` for latitude, `DDDMM.MM` or `DDDMM.MMM` for longitude). Positions display as signed decimal degrees (negative = South/West).
 
 **Hosting:** Can be opened locally (double-click) or hosted on any web server. For HTTPS sites, the page auto-selects the WSS server to avoid mixed-content blocking.
+
+### Firmware Flasher
+
+A browser-based firmware flasher (`tools/flash.html`) using Espressif's esptool-js and WebSerial API. Requires Chrome or Edge. See `tools/FIRMWARE-FLASHER.md` for full documentation.
+
+**Merge script:** `tools/merge_firmware.sh` combines bootloader + partitions + firmware into a single flashable binary. Auto-detects flash size from the environment name. Usage:
+```bash
+./tools/merge_firmware.sh esp32-s3-devkitc1-n16r8
+# Output: tools/ESP32APRS-esp32-s3-devkitc1-n16r8.bin
+```
+
+### Default Configuration
+
+Default configuration values are defined in two places that must be kept in sync:
+- **`defaultConfig()` in `src/main.cpp` (~line 1370)** — authoritative runtime defaults, used on first boot when no `/default.cfg` exists on LittleFS
+- **`data/default.cfg`** — JSON template for manual filesystem uploads; regenerate by flashing to a clean board and downloading via the Files tab
+
+**Note:** Several status fields (`igate_status`, `digi_status`, `trk_status`) are limited to 49 characters (`STATUS_SIZE` = 50 in `config.h`). URLs must fit within this limit.
 
 ## Important Notes
 

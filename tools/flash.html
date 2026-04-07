@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32APRS Audio HARC Firmware Flasher</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #1a1a1a; color: #e0e0e0;
+    display: flex; justify-content: center; align-items: center;
+    min-height: 100vh; padding: 20px;
+  }
+  .container {
+    background: #2a2a2a; border-radius: 12px; padding: 32px;
+    max-width: 520px; width: 100%; box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .subtitle { color: #888; font-size: 13px; margin-bottom: 24px; }
+  .section { margin-bottom: 20px; }
+  label { display: block; font-size: 13px; color: #aaa; margin-bottom: 6px; }
+  select, input[type="file"] {
+    width: 100%; padding: 8px 12px; border-radius: 6px;
+    border: 1px solid #444; background: #333; color: #e0e0e0;
+    font-size: 14px; cursor: pointer;
+  }
+  select:hover, input[type="file"]:hover { border-color: #666; }
+  .file-info { font-size: 12px; color: #888; margin-top: 4px; }
+  .btn {
+    width: 100%; padding: 12px; border: none; border-radius: 8px;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-connect { background: #2563eb; color: white; }
+  .btn-connect:hover { background: #1d4ed8; }
+  .btn-flash { background: #16a34a; color: white; }
+  .btn-flash:hover { background: #15803d; }
+  .btn-disconnect { background: #666; color: white; }
+  .btn-disconnect:hover { background: #555; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn + .btn { margin-top: 8px; }
+  .progress-wrap {
+    background: #333; border-radius: 6px; height: 24px;
+    overflow: hidden; margin: 12px 0;
+    display: none;
+  }
+  .progress-bar {
+    height: 100%; background: #16a34a; border-radius: 6px;
+    transition: width 0.3s; width: 0%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 600; min-width: 40px;
+  }
+  .console {
+    background: #111; border-radius: 6px; padding: 10px;
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 12px;
+    height: 200px; overflow-y: auto; line-height: 1.5;
+    border: 1px solid #333;
+  }
+  .console .info { color: #60a5fa; }
+  .console .success { color: #4ade80; }
+  .console .error { color: #f87171; }
+  .console .warn { color: #fbbf24; }
+  .chip-info {
+    background: #333; border-radius: 6px; padding: 10px;
+    font-size: 13px; margin-bottom: 16px; display: none;
+  }
+  .chip-info span { color: #4ade80; }
+  .status {
+    text-align: center; font-size: 13px; color: #888;
+    margin-top: 12px;
+  }
+  .status.connected { color: #4ade80; }
+  .status.flashing { color: #fbbf24; }
+  .status.error { color: #f87171; }
+  .warning {
+    background: #442; border: 1px solid #664; border-radius: 6px;
+    padding: 10px; font-size: 12px; color: #fbbf24; margin-bottom: 16px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>ESP32APRS Audio HARC Firmware Flasher</h1>
+  <p class="subtitle">Flash firmware to ESP32-S3 via USB &mdash; requires Chrome or Edge</p>
+
+  <div class="warning" id="browserWarning" style="display:none">
+    WebSerial is not supported in this browser. Please use Chrome or Edge.
+  </div>
+
+  <div class="section">
+    <label>Baud Rate</label>
+    <select id="baudRate">
+      <option value="115200">115200</option>
+      <option value="230400">230400</option>
+      <option value="460800" selected>460800</option>
+      <option value="921600">921600</option>
+    </select>
+  </div>
+
+  <div class="section">
+    <label>Firmware File (.bin)</label>
+    <input type="file" id="firmwareFile" accept=".bin">
+    <div class="file-info" id="fileInfo">Select a merged firmware .bin file or individual firmware.bin</div>
+  </div>
+
+  <div class="section">
+    <label>Flash Address</label>
+    <select id="flashAddr">
+      <option value="0x0">0x0 (merged image)</option>
+      <option value="0x10000">0x10000 (firmware only)</option>
+    </select>
+  </div>
+
+  <div class="chip-info" id="chipInfo">
+    Chip: <span id="chipName">—</span> &nbsp;|&nbsp;
+    MAC: <span id="chipMAC">—</span>
+  </div>
+
+  <button class="btn btn-connect" id="connectBtn" onclick="doConnect()">Connect</button>
+  <button class="btn btn-flash" id="flashBtn" onclick="doFlash()" disabled>Flash Firmware</button>
+  <button class="btn btn-disconnect" id="disconnectBtn" onclick="doDisconnect()" style="display:none">Disconnect</button>
+
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-bar" id="progressBar">0%</div>
+  </div>
+
+  <div class="status" id="status">Not connected</div>
+
+  <div class="section" style="margin-top: 16px">
+    <label>Console</label>
+    <div class="console" id="console"></div>
+  </div>
+</div>
+
+<script type="module">
+  // esptool-js imports
+  import { ESPLoader, Transport } from 'https://cdn.jsdelivr.net/npm/esptool-js@0.5.7/bundle.js';
+
+  let transport = null;
+  let loader = null;
+  let connected = false;
+
+  // Check WebSerial support
+  if (!('serial' in navigator)) {
+    document.getElementById('browserWarning').style.display = 'block';
+    document.getElementById('connectBtn').disabled = true;
+  }
+
+  // Console logging
+  const consoleEl = document.getElementById('console');
+  function log(msg, cls = 'info') {
+    const line = document.createElement('div');
+    line.className = cls;
+    line.textContent = msg;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  // Terminal interface for ESPLoader
+  const espTerminal = {
+    clean() { consoleEl.innerHTML = ''; },
+    writeLine(data) { log(data); },
+    write(data) {
+      // Filter out noisy raw data
+      const s = data.toString().trim();
+      if (s && !s.startsWith('\r') && !s.startsWith('\n')) {
+        log(s);
+      }
+    }
+  };
+
+  function setStatus(msg, cls = '') {
+    const el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = 'status ' + cls;
+  }
+
+  function setProgress(pct) {
+    const bar = document.getElementById('progressBar');
+    bar.style.width = pct + '%';
+    bar.textContent = Math.round(pct) + '%';
+  }
+
+  // File info display
+  document.getElementById('firmwareFile').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const sizeKB = (file.size / 1024).toFixed(1);
+      document.getElementById('fileInfo').textContent = `${file.name} (${sizeKB} KB)`;
+      updateFlashButton();
+    }
+  });
+
+  function updateFlashButton() {
+    const hasFile = document.getElementById('firmwareFile').files.length > 0;
+    document.getElementById('flashBtn').disabled = !(connected && hasFile);
+  }
+
+  // Connect
+  window.doConnect = async function() {
+    try {
+      const port = await navigator.serial.requestPort();
+      transport = new Transport(port, true);
+
+      const baudRate = parseInt(document.getElementById('baudRate').value);
+      log(`Connecting at ${baudRate} baud...`);
+      setStatus('Connecting...', 'flashing');
+
+      loader = new ESPLoader({
+        transport: transport,
+        baudrate: baudRate,
+        terminal: espTerminal,
+        romBaudrate: 115200
+      });
+
+      const chip = await loader.main();
+      log(`Connected: ${chip}`, 'success');
+
+      // Read flash ID
+      await loader.flashId();
+
+      // Extract chip name and MAC from loader
+      const chipName = chip || 'ESP32-S3';
+      let macAddr = '—';
+      try { macAddr = loader.macAddr(); } catch(e) {
+        // MAC already printed in console by loader.main()
+      }
+
+      document.getElementById('chipName').textContent = chipName;
+      document.getElementById('chipMAC').textContent = macAddr;
+      document.getElementById('chipInfo').style.display = 'block';
+
+      connected = true;
+      document.getElementById('connectBtn').style.display = 'none';
+      document.getElementById('disconnectBtn').style.display = 'block';
+      setStatus('Connected to ' + chipName, 'connected');
+      updateFlashButton();
+
+    } catch (err) {
+      log('Connection failed: ' + err.message, 'error');
+      setStatus('Connection failed', 'error');
+      connected = false;
+    }
+  };
+
+  // Flash
+  window.doFlash = async function() {
+    const fileInput = document.getElementById('firmwareFile');
+    if (!fileInput.files.length) { log('No file selected', 'error'); return; }
+    if (!loader) { log('Not connected', 'error'); return; }
+
+    const file = fileInput.files[0];
+    const arrayBuf = await file.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuf);
+    // esptool-js expects a binary string, not Uint8Array
+    let data = '';
+    for (let i = 0; i < bytes.length; i++) { data += String.fromCharCode(bytes[i]); }
+    const addr = parseInt(document.getElementById('flashAddr').value);
+
+    document.getElementById('flashBtn').disabled = true;
+    document.getElementById('progressWrap').style.display = 'block';
+    setProgress(0);
+
+    log(`Flashing ${file.name} (${data.length} bytes) to 0x${addr.toString(16)}...`);
+    setStatus('Erasing flash...', 'flashing');
+
+    try {
+      await loader.writeFlash({
+        fileArray: [{ data: data, address: addr }],
+        flashSize: 'keep',
+        flashMode: 'dio',
+        flashFreq: '80m',
+        eraseAll: false,
+        compress: true,
+        reportProgress: (fileIndex, written, total) => {
+          const pct = (written / total) * 100;
+          setProgress(pct);
+          if (written === total) {
+            setStatus('Verifying...', 'flashing');
+          } else {
+            setStatus(`Flashing: ${Math.round(pct)}%`, 'flashing');
+          }
+        }
+      });
+
+      setProgress(100);
+      log('Flash complete!', 'success');
+      setStatus('Flash complete! Resetting...', 'connected');
+
+      // Hard reset to run new firmware
+      try {
+        await loader.hardReset();
+        log('Device reset — running new firmware', 'success');
+      } catch (e) {
+        log('Auto-reset failed — please manually reset the device', 'warn');
+      }
+
+    } catch (err) {
+      log('Flash failed: ' + err.message, 'error');
+      setStatus('Flash failed', 'error');
+    }
+
+    document.getElementById('flashBtn').disabled = false;
+  };
+
+  // Disconnect
+  window.doDisconnect = async function() {
+    try {
+      if (transport) {
+        await transport.disconnect();
+      }
+    } catch (e) { /* ignore */ }
+    transport = null;
+    loader = null;
+    connected = false;
+    document.getElementById('connectBtn').style.display = 'block';
+    document.getElementById('disconnectBtn').style.display = 'none';
+    document.getElementById('chipInfo').style.display = 'none';
+    document.getElementById('progressWrap').style.display = 'none';
+    setStatus('Disconnected');
+    updateFlashButton();
+    log('Disconnected');
+  };
+</script>
+</body>
+</html>

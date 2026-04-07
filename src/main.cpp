@@ -1376,30 +1376,29 @@ void defaultConfig()
     config.cpuFreq = 160;
 #endif
     config.synctime = true;
-    config.timeZone = 7;
+    config.timeZone = -3; // Changed for HARC
     config.tx_timeslot = 2000; // ms
 
     config.wifi_mode = WIFI_AP_STA_FIX;
     config.wifi_power = 44; // WIFI_POWER_11dBm
     config.wifi_ap_ch = 6;
     config.wifi_sta[0].enable = true;
-    sprintf(config.wifi_sta[0].wifi_ssid, "APRSTH");
-    sprintf(config.wifi_sta[0].wifi_pass, "aprsthnetwork");
+    sprintf(config.wifi_sta[0].wifi_ssid, "ESP32APRS"); // Changed for HARC
+    sprintf(config.wifi_sta[0].wifi_pass, "ESP32APRS"); // Changed for HARC
     for (int i = 1; i < 5; i++)
     {
         config.wifi_sta[i].enable = false;
         config.wifi_sta[i].wifi_ssid[0] = 0;
         config.wifi_sta[i].wifi_pass[0] = 0;
     }
-    sprintf(config.wifi_ap_ssid, "ESP32APRS_Audio");
-    sprintf(config.wifi_ap_pass, "aprsthnetwork");
-
+    sprintf(config.wifi_ap_ssid, "ESP32APRS"); // Changed for HARC
+    sprintf(config.wifi_ap_pass, "ESP32APRS"); // Changed for HARC
     // Blutooth
     config.bt_slave = false;
     config.bt_master = false;
     config.bt_mode = 1; // 0-None,1-TNC2RAW,2-KISS
     config.bt_power = 3;
-    sprintf(config.bt_name, "ESP32APRS_Audio");
+    sprintf(config.bt_name, "ESP32APRS");
     config.bt_pin = 0;
 #if !defined(CONFIG_IDF_TARGET_ESP32)
     // Bluetooth BLE
@@ -1437,12 +1436,12 @@ void defaultConfig()
     config.rf_pwr_active = 1;
     config.rf_ptt_active = 0;
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
-    config.rf_tx_gpio = 17;
-    config.rf_rx_gpio = 18;
+    config.rf_tx_gpio = 18; // Changed for HARC
+    config.rf_rx_gpio = 19; // Changed for HARC
     config.rf_sql_gpio = -1;
     config.rf_pd_gpio = 4;
     config.rf_pwr_gpio = -1;
-    config.rf_ptt_gpio = 5;
+    config.rf_ptt_gpio = 16; // Changed for HARC
     config.rf_sql_active = 0;
     config.rf_pd_active = 1;
     config.rf_pwr_active = 1;
@@ -1465,13 +1464,12 @@ void defaultConfig()
 
     config.audio_hpf = false;
     config.audio_lpf = false;
-    config.preamble = 3;
-    sprintf(config.ntp_host, "aprs.nakhonthai.net");
-
+    config.preamble = 5; // Changed for HARC
+    sprintf(config.ntp_host, "ca.pool.ntp.org"); // Changed for HARC
     // IGATE
     config.igate_bcn = false;
     config.igate_en = false;
-    config.rf2inet = true;
+    config.rf2inet = false; // Changed for HARC
     config.inet2rf = false;
     config.igate_loc2rf = false;
     config.igate_loc2inet = true;
@@ -1481,28 +1479,28 @@ void defaultConfig()
     config.aprs_ssid = 1;
     config.aprs_port = 14580;
     sprintf(config.aprs_mycall, "NOCALL");
-    sprintf(config.aprs_host, "aprs.nakhonthai.net");
+    sprintf(config.aprs_host, "nohost"); // Changed for HARC
     memset(config.aprs_passcode, 0, sizeof(config.aprs_passcode));
     sprintf(config.aprs_moniCall, "%s-%d", config.aprs_mycall, config.aprs_ssid);
     sprintf(config.aprs_filter, "m/10");
     //--Position
     config.igate_gps = false;
-    config.igate_lat = 13.7555;
-    config.igate_lon = 100.4930;
-    config.igate_alt = 0;
+    config.igate_lat = 44.63366; // Changed for HARC
+    config.igate_lon = -63.78316; // Changed for HARC
+    config.igate_alt = 100; // Changed for HARC
     config.igate_interval = 600;
     sprintf(config.igate_symbol, "A&");
     memset(config.igate_object, 0, sizeof(config.igate_object));
     memset(config.igate_phg, 0, sizeof(config.igate_phg));
     config.igate_path = 8;
     sprintf(config.igate_comment, "");
-    sprintf(config.igate_status, "https://github.com/nakhonthai/ESP32APRS_Audio");
+    sprintf(config.igate_status, "github.com/RocketManRC/ESP32APRS_Audio_HARC"); // Changed for HARC
     config.igate_sts_interval = 1800;
 
     // DIGI REPEATER
     config.digi_en = false;
     config.digi_auto = false;
-    config.digi_loc2rf = true;
+    config.digi_loc2rf = false; // Changed for HARC
     config.digi_loc2inet = false;
     config.digi_ssid = 3;
     config.digi_timestamp = false;
@@ -1510,9 +1508,9 @@ void defaultConfig()
     config.digi_path = 8;
     //--Position
     config.digi_gps = false;
-    config.digi_lat = 13.7555;
-    config.digi_lon = 100.4930;
-    config.digi_alt = 0;
+    config.digi_lat = 44.63366; // Changed for HARC
+    config.digi_lon = -63.78316; // Changed for HARC
+    config.digi_alt = 100; // Changed for HARC
     config.digi_interval = 600;
     config.igate_timestamp = false;
     config.digi_delay = 0;
@@ -1521,12 +1519,12 @@ void defaultConfig()
     sprintf(config.digi_symbol, "A#");
     memset(config.digi_phg, 0, sizeof(config.digi_phg));
     sprintf(config.digi_comment, "");
-    sprintf(config.digi_status, "https://github.com/nakhonthai/ESP32APRS_Audio");
+    sprintf(config.digi_status, "github.com/RocketManRC/ESP32APRS_Audio_HARC"); // Changed for HARC
     config.digi_sts_interval = 1800;
 
     // Tracker
     config.trk_en = false;
-    config.trk_loc2rf = true;
+    config.trk_loc2rf = false; // Changed for HARC
     config.trk_loc2inet = false;
     config.trk_rssi = false;
     config.trk_sat = false;
@@ -1538,9 +1536,9 @@ void defaultConfig()
 
     //--Position
     config.trk_gps = false;
-    config.trk_lat = 13.7555;
-    config.trk_lon = 100.4930;
-    config.trk_alt = 0;
+    config.trk_lat = 44.63366; // Changed for HARC
+    config.trk_lon = -63.78316; // Changed for HARC
+    config.trk_alt = 100; // Changed for HARC
     config.trk_interval = 600;
     // Smart beacon
     config.trk_smartbeacon = true;
@@ -1561,30 +1559,30 @@ void defaultConfig()
     sprintf(config.trk_mycall, "NOCALL");
     sprintf(config.trk_comment, "");
     memset(config.trk_item, 0, sizeof(config.trk_item));
-    sprintf(config.trk_status, "https://github.com/nakhonthai/ESP32APRS_Audio");
+    sprintf(config.trk_status, "github.com/RocketManRC/ESP32APRS_Audio_HARC"); // Changed for HARC
     config.trk_sts_interval = 1800;
 
     // WX
     config.wx_en = false;
     config.wx_2rf = true;
-    config.wx_2inet = true;
+    config.wx_2inet = false; // Changed for HARC
     // config.wx_channel = 0;
     config.wx_ssid = 13;
     sprintf(config.wx_mycall, "NOCALL");
-    config.wx_path = 8;
+    config.wx_path = 15; // Changed for HARC
     sprintf(config.wx_comment, "WX MODE");
     memset(config.wx_object, 0, sizeof(config.wx_object));
     config.wx_gps = false;
-    config.wx_lat = 13.7555;
-    config.wx_lon = 100.4930;
-    config.wx_alt = 0;
+    config.wx_lat = 44.63366; // Changed for HARC
+    config.wx_lon = -63.78316; // Changed for HARC
+    config.wx_alt = 100;
     config.wx_interval = 600;
     config.wx_flage = 0;
 
     // Telemetry_0
     config.tlm0_en = false;
-    config.tlm0_2rf = true;
-    config.tlm0_2inet = true;
+    config.tlm0_2rf = false; // Changed for HARC
+    config.tlm0_2inet = false; // Changed for HARC
     config.tlm0_ssid = 0;
     sprintf(config.tlm0_mycall, "NOCALL");
     config.tlm0_path = 0;
@@ -1661,17 +1659,12 @@ void defaultConfig()
     config.rx_display = true;
 
     // afsk,TNC
-    sprintf(config.ntp_host, "ntp.nakhonthai.net");
-
-    sprintf(config.path[0], "WIDE1-1");
-    sprintf(config.path[1], "WIDE1-1,WIDE2-1");
-    sprintf(config.path[2], "TRACK3-3");
-    sprintf(config.path[3], "RS0ISS");
+    sprintf(config.ntp_host, "ca.pool.ntp.org"); // Changed for HARC
 
     // VPN Wireguard
     config.vpn = false;
     config.wg_port = 51820;
-    sprintf(config.wg_peer_address, "vpn.nakhonthai.net");
+    sprintf(config.wg_peer_address, "nopeer"); // Changed for HARC
     sprintf(config.wg_local_address, "192.168.1.2");
     sprintf(config.wg_netmask_address, "255.255.255.0");
     sprintf(config.wg_gw_address, "192.168.1.1");
@@ -1962,7 +1955,7 @@ void defaultConfig()
     sprintf(config.path[2], "WIDE1-1,WIDE2-1");
     sprintf(config.path[3], "RFONLY");
 
-    config.msg_enable = true;
+    config.msg_enable = false; // Changed for HARC
     config.msg_encrypt = false;
     config.msg_rf = true;
     config.msg_inet = true;
@@ -2008,7 +2001,7 @@ void defaultConfig()
     config.digi_tlm_interval = 0;
     config.igate_tlm_interval = 0;
     config.wx_tlm_interval = 0;
-    sprintf(config.host_name, "ESP32APRS_Audio");
+    sprintf(config.host_name, "ESP32APRS"); // Changed for HARC
 
     config.fx25_mode = 2; // Used modem mode FX.25 RX+TX
 }
@@ -3436,6 +3429,7 @@ void setup()
         if (config.modbus_channel == 4)
         {
             // TCP mode
+            modbusWiFiClient.setConnectionTimeout(3000); // 3s connect timeout (default is ~60s TCP SYN timeout)
             modbusTCP = new ModbusClientTCP(modbusWiFiClient);
             modbusTCP->setTimeout(2000);
             IPAddress tcpAddr;

@@ -913,36 +913,60 @@ String event_lastHeard(bool gethtml)
 
 	struct pbuf_t aprs;
 	ParseAPRS aprsParse;
-	struct tm tmstruct,tmNow;
+	struct tm tmstruct, tmNow;
 
-	String html = "";
-	String line = "";
 	//sort(pkgList, PKGLISTSIZE);
 	time_t timeNow = time(NULL);
 
 	// log_d("Create html last heard");
 	localtime_r(&timeNow, &tmNow);
 
-	html = "<table>\n";
-	html += "<th colspan=\"7\" style=\"background-color: #070ac2;\">LAST HEARD <a href=\"/tnc2\" target=\"_tnc2\" style=\"color: yellow;font-size:8pt\">[RAW]</a></th>\n";
-	html += "<tr>\n";
-	html += "<th style=\"min-width:10ch\"><span><b>Time (";
-	if (config.timeZone >= 0)
-		html += "+";
-	// else
-	//	html += "-";
+	// Pre-allocate output buffer to avoid String realloc fragmentation
+	const int BUF_SIZE = 24000;
+#ifdef BOARD_HAS_PSRAM
+	char *buf = (char *)ps_calloc(BUF_SIZE, sizeof(char));
+#else
+	char *buf = (char *)calloc(BUF_SIZE, sizeof(char));
+#endif
+	if (!buf)
+	{
+		log_w("event_lastHeard: alloc failed (%d bytes)", BUF_SIZE);
+		return "";
+	}
+	int pos = 0;
 
-	if (config.timeZone == (int)config.timeZone)
-		html += String((int)config.timeZone) + ")</b></span></th>\n";
+	pos += snprintf(buf + pos, BUF_SIZE - pos, "<table>\n");
+	pos += snprintf(buf + pos, BUF_SIZE - pos,
+		"<th colspan=\"7\" style=\"background-color: #070ac2;\">LAST HEARD "
+		"<a href=\"/tnc2\" target=\"_tnc2\" style=\"color: yellow;font-size:8pt\">[RAW]</a></th>\n");
+	pos += snprintf(buf + pos, BUF_SIZE - pos, "<tr>\n");
+
+	char tzBuf[64];
+	if (config.timeZone >= 0)
+	{
+		if (config.timeZone == (int)config.timeZone)
+			snprintf(tzBuf, sizeof(tzBuf), "+%d", (int)config.timeZone);
+		else
+			snprintf(tzBuf, sizeof(tzBuf), "+%.1f", config.timeZone);
+	}
 	else
-		html += String(config.timeZone, 1) + ")</b></span></th>\n";
-	html += "<th style=\"min-width:16px\">ICON</th>\n";
-	html += "<th style=\"min-width:10ch\">Callsign</th>\n";
-	html += "<th>VIA LAST PATH</th>\n";
-	html += "<th style=\"min-width:5ch\">DX</th>\n";
-	html += "<th style=\"min-width:5ch\">PACKET</th>\n";
-	html += "<th style=\"min-width:5ch\">AUDIO</th>\n";
-	html += "</tr>\n";
+	{
+		if (config.timeZone == (int)config.timeZone)
+			snprintf(tzBuf, sizeof(tzBuf), "%d", (int)config.timeZone);
+		else
+			snprintf(tzBuf, sizeof(tzBuf), "%.1f", config.timeZone);
+	}
+	pos += snprintf(buf + pos, BUF_SIZE - pos,
+		"<th style=\"min-width:10ch\"><span><b>Time (%s)</b></span></th>\n", tzBuf);
+
+	pos += snprintf(buf + pos, BUF_SIZE - pos,
+		"<th style=\"min-width:16px\">ICON</th>\n"
+		"<th style=\"min-width:10ch\">Callsign</th>\n"
+		"<th>VIA LAST PATH</th>\n"
+		"<th style=\"min-width:5ch\">DX</th>\n"
+		"<th style=\"min-width:5ch\">PACKET</th>\n"
+		"<th style=\"min-width:5ch\">AUDIO</th>\n"
+		"</tr>\n");
 
 	for (int i = 0; i < PKGLISTSIZE; i++)
 	{
@@ -951,26 +975,51 @@ String event_lastHeard(bool gethtml)
 		pkgListType pkg = getPkgList(i);
 		if (pkg.time > 0)
 		{
-			line = String(pkg.raw);
-			// log_d("IDX=%d RAW:%s",i,line.c_str());
+			// Copy raw packet directly into aprs.data (avoid stack-local line[300])
+			memset(&aprs, 0, sizeof(pbuf_t));
+			aprs.buf_len = 300;
+			int rawLen = strlen(pkg.raw);
+			int lineLen = (rawLen < 299) ? rawLen : 299;
+			memcpy(aprs.data, pkg.raw, lineLen);
+			aprs.data[lineLen] = '\0';
+			aprs.packet_len = lineLen;
+
+			// log_d("IDX=%d RAW:%s",i,aprs.data);
 			int packet = pkg.pkg;
-			int start_val = line.indexOf(">", 0); // หาตำแหน่งแรกของ >
+			char *pGt = strchr(aprs.data, '>');
+			int start_val = pGt ? (int)(pGt - aprs.data) : -1;
 			if (start_val > 3)
 			{
-				String src_call = line.substring(0, start_val);
-				memset(&aprs, 0, sizeof(pbuf_t));
-				aprs.buf_len = 300;
-				aprs.packet_len = line.length();
-				line.toCharArray(&aprs.data[0], aprs.packet_len);
-				int start_info = line.indexOf(":", 0);
-				int end_ssid = line.indexOf(",", 0);
-				int start_dst = line.indexOf(">", 2);
-				int start_dstssid = line.indexOf("-", start_dst);
-				String path = "";
+				char src_call[12];
+				int srcLen = (start_val < (int)sizeof(src_call) - 1) ? start_val : (int)sizeof(src_call) - 1;
+				memcpy(src_call, aprs.data, srcLen);
+				src_call[srcLen] = '\0';
 
-				if ((end_ssid > start_dst) && (end_ssid < start_info))
+				char *pColon = strchr(aprs.data, ':');
+				char *pComma = strchr(aprs.data, ',');
+				int start_info = pColon ? (int)(pColon - aprs.data) : -1;
+				int end_ssid = pComma ? (int)(pComma - aprs.data) : -1;
+				int start_dst = start_val;
+
+				// Find '-' after '>' for SSID
+				int start_dstssid = -1;
+				for (char *p = pGt + 1; p < aprs.data + lineLen && p < pGt + 10; p++)
 				{
-					path = line.substring(end_ssid + 1, start_info);
+					if (*p == '-') { start_dstssid = (int)(p - aprs.data); break; }
+					if (*p == ',' || *p == ':') break;
+				}
+
+				char path[128];
+				path[0] = '\0';
+
+				if (start_info >= 0 && (end_ssid > start_dst) && (end_ssid < start_info))
+				{
+					int pathLen = start_info - end_ssid - 1;
+					if (pathLen > 0 && pathLen < (int)sizeof(path))
+					{
+						memcpy(path, aprs.data + end_ssid + 1, pathLen);
+						path[pathLen] = '\0';
+					}
 				}
 				if (end_ssid < 5)
 					end_ssid = start_info;
@@ -988,82 +1037,92 @@ String event_lastHeard(bool gethtml)
 				aprs.dstcall_end = &aprs.data[end_ssid];
 				aprs.srccall_end = &aprs.data[start_dst];
 
-				// Serial.println(aprs.info_start);
 				if (aprsParse.parse_aprs(&aprs))
 				{
 					pkg.calsign[10] = 0;
-					// time_t tm = pkg.time;
 					localtime_r(&pkg.time, &tmstruct);
 					char strTime[10];
-					if(tmNow.tm_mday==tmstruct.tm_mday)
+					if (tmNow.tm_mday == tmstruct.tm_mday)
 						sprintf(strTime, "%02d:%02d:%02d", tmstruct.tm_hour, tmstruct.tm_min, tmstruct.tm_sec);
-					else	
+					else
 						sprintf(strTime, "%02dD %02d:%02d", tmstruct.tm_mday, tmstruct.tm_hour, tmstruct.tm_min);
-					// String str = String(tmstruct.tm_hour, DEC) + ":" + String(tmstruct.tm_min, DEC) + ":" + String(tmstruct.tm_sec, DEC);
 
-					html += "<tr><td>" + String(strTime) + "</td>";
-					String fileImg = "";
+					pos += snprintf(buf + pos, BUF_SIZE - pos, "<tr><td>%s</td>", strTime);
+
+					// Icon cell
 					uint8_t sym = (uint8_t)aprs.symbol[1];
 					if (sym > 31 && sym < 127)
 					{
 						if (aprs.symbol[0] > 64 && aprs.symbol[0] < 91) // table A-Z
 						{
-							html += "<td><b>" + String(aprs.symbol[0]) + "</b></td>";
+							pos += snprintf(buf + pos, BUF_SIZE - pos,
+								"<td><b>%c</b></td>", aprs.symbol[0]);
+						}
+						else if (aprs.symbol[0] == 92)
+						{
+							pos += snprintf(buf + pos, BUF_SIZE - pos,
+								"<td><img src=\"http://aprs.dprns.com/symbols/icons/%d-2.png\"></td>", sym);
+						}
+						else if (aprs.symbol[0] == 47)
+						{
+							pos += snprintf(buf + pos, BUF_SIZE - pos,
+								"<td><img src=\"http://aprs.dprns.com/symbols/icons/%d-1.png\"></td>", sym);
 						}
 						else
 						{
-							fileImg = String(sym, DEC);
-							if (aprs.symbol[0] == 92)
-							{
-								fileImg += "-2.png";
-							}
-							else if (aprs.symbol[0] == 47)
-							{
-								fileImg += "-1.png";
-							}
-							else
-							{
-								fileImg = "dot.png";
-							}
-							html += "<td><img src=\"http://aprs.dprns.com/symbols/icons/" + fileImg + "\"></td>";
+							pos += snprintf(buf + pos, BUF_SIZE - pos,
+								"<td><img src=\"http://aprs.dprns.com/symbols/icons/dot.png\"></td>");
 						}
-						fileImg.clear();
 					}
 					else
 					{
-						html += "<td><img src=\"http://aprs.dprns.com/symbols/icons/dot.png\"></td>";
+						pos += snprintf(buf + pos, BUF_SIZE - pos,
+							"<td><img src=\"http://aprs.dprns.com/symbols/icons/dot.png\"></td>");
 					}
-					html += "<td>" + src_call;
+
+					// Callsign cell
 					if (aprs.srcname_len > 0 && aprs.srcname_len < 10) // Get Item/Object
 					{
 						char itemname[10];
-						memset(&itemname, 0, 10);
-						memcpy(&itemname, aprs.srcname, aprs.srcname_len);
-						html += "(" + String(itemname) + ")";
-					}
-					html += +"</td>";
-					if (path == "")
-					{
-						html += "<td style=\"text-align: left;\">RF: DIRECT</td>";
+						memset(itemname, 0, 10);
+						memcpy(itemname, aprs.srcname, aprs.srcname_len);
+						pos += snprintf(buf + pos, BUF_SIZE - pos,
+							"<td>%s(%s)</td>", src_call, itemname);
 					}
 					else
 					{
-						String LPath = path.substring(path.lastIndexOf(',') + 1);
-						// if(path.indexOf("qAR")>=0 || path.indexOf("qAS")>=0 || path.indexOf("qAC")>=0){ //Via from Internet Server
-						if (path.indexOf("qA") >= 0 || path.indexOf("TCPIP") >= 0)
+						pos += snprintf(buf + pos, BUF_SIZE - pos,
+							"<td>%s</td>", src_call);
+					}
+
+					// Path/VIA cell
+					if (path[0] == '\0')
+					{
+						pos += snprintf(buf + pos, BUF_SIZE - pos,
+							"<td style=\"text-align: left;\">RF: DIRECT</td>");
+					}
+					else
+					{
+						char *lastComma = strrchr(path, ',');
+						const char *LPath = lastComma ? lastComma + 1 : path;
+
+						if (strstr(path, "qA") != NULL || strstr(path, "TCPIP") != NULL)
 						{
-							html += "<td style=\"text-align: left;\">INET: " + LPath + "</td>";
+							pos += snprintf(buf + pos, BUF_SIZE - pos,
+								"<td style=\"text-align: left;\">INET: %s</td>", LPath);
 						}
 						else
 						{
-							if (path.indexOf("*") > 0)
-								html += "<td style=\"text-align: left;\">DIGI: " + path + "</td>";
+							if (strchr(path, '*') != NULL)
+								pos += snprintf(buf + pos, BUF_SIZE - pos,
+									"<td style=\"text-align: left;\">DIGI: %s</td>", path);
 							else
-								html += "<td style=\"text-align: left;\">RF: " + path + "</td>";
+								pos += snprintf(buf + pos, BUF_SIZE - pos,
+									"<td style=\"text-align: left;\">RF: %s</td>", path);
 						}
-						LPath.clear();
 					}
-					// html += "<td>" + path + "</td>";
+
+					// DX cell
 					if (aprs.flags & F_HASPOS)
 					{
 						double lat, lon;
@@ -1079,62 +1138,46 @@ String event_lastHeard(bool gethtml)
 						}
 						double dtmp = aprsParse.direction(lon, lat, aprs.lng, aprs.lat);
 						double dist = aprsParse.distance(lon, lat, aprs.lng, aprs.lat);
-						html += "<td>" + String(dist, 1) + "km/" + String(dtmp, 0) + "°</td>";
+						pos += snprintf(buf + pos, BUF_SIZE - pos,
+							"<td>%.1fkm/%.0f°</td>", dist, dtmp);
 					}
 					else
 					{
-						html += "<td>-</td>\n";
+						pos += snprintf(buf + pos, BUF_SIZE - pos, "<td>-</td>\n");
 					}
-					html += "<td>" + String(packet) + "</td>\n";
+					pos += snprintf(buf + pos, BUF_SIZE - pos, "<td>%d</td>\n", packet);
 					if (pkg.audio_level == 0)
 					{
-						html += "<td>-</td></tr>\n";
+						pos += snprintf(buf + pos, BUF_SIZE - pos, "<td>-</td></tr>\n");
 					}
 					else
 					{
 						double Vrms = (double)pkg.audio_level / 1000;
 						double audBV = 20.0F * log10(Vrms);
+						const char *color;
 						if (audBV < -20.0F)
-						{
-							html += "<td style=\"color: #0000f0;\">";
-						}
+							color = "#0000f0";
 						else if (audBV > -5.0F)
-						{
-							html += "<td style=\"color: #f00000;\">";
-						}
+							color = "#f00000";
 						else
-						{
-							html += "<td style=\"color: #008000;\">";
-						}
-						html += String(audBV, 1) + "dBV</td></tr>\n";
+							color = "#008000";
+						pos += snprintf(buf + pos, BUF_SIZE - pos,
+							"<td style=\"color: %s;\">%.1fdBV</td></tr>\n", color, audBV);
 					}
 				}
-				path.clear();
-				src_call.clear();
 			}
-			line.clear();
 		}
 	}
-	html += "</table>\n";
-	// log_d("HTML Length=%d Byte",html.length());
-	if(gethtml) return html;
-	size_t len = html.length();
-#ifdef BOARD_HAS_PSRAM
-	char *info = (char *)ps_calloc(len + 1, sizeof(char));
-#else
-	char *info = (char *)calloc(len + 1, sizeof(char));
-#endif
-	if(info)
+	pos += snprintf(buf + pos, BUF_SIZE - pos, "</table>\n");
+	// log_d("HTML Length=%d Byte", pos);
+	if (gethtml)
 	{
-		html.toCharArray(info, len + 1, 0);
-		html.clear();
-		lastheard_events.send(info, "lastHeard", millis() / 1000, 3000);
-		free(info);
+		String result(buf);
+		free(buf);
+		return result;
 	}
-	else
-	{
-		log_w("event_lastHeard: alloc failed (%d bytes)", len + 1);
-	}
+	lastheard_events.send(buf, "lastHeard", millis() / 1000, 3000);
+	free(buf);
 	return "";
 }
 
@@ -1146,27 +1189,47 @@ String event_chatMessage(bool gethtml)
 
 	struct tm tmstruct, tmNow;
 
-	String html = "";
-
 	time_t timen = time(NULL);
 	localtime_r(&timen, &tmNow);
 
-	html += "<tr>\n";
-	html += "<th style=\"width:60pt\"><span><b>Time (";
+	// Pre-allocate output buffer to avoid String realloc fragmentation
+	const int BUF_SIZE = 16000;
+#ifdef BOARD_HAS_PSRAM
+	char *buf = (char *)ps_calloc(BUF_SIZE, sizeof(char));
+#else
+	char *buf = (char *)calloc(BUF_SIZE, sizeof(char));
+#endif
+	if (!buf)
+	{
+		log_w("event_chatMessage: alloc failed (%d bytes)", BUF_SIZE);
+		return "";
+	}
+	int pos = 0;
+
+	char tzBuf[64];
 	if (config.timeZone >= 0)
-		html += "+";
-
-	if (config.timeZone == (int)config.timeZone)
-		html += String((int)config.timeZone) + ")</b></span></th>\n";
+	{
+		if (config.timeZone == (int)config.timeZone)
+			snprintf(tzBuf, sizeof(tzBuf), "+%d", (int)config.timeZone);
+		else
+			snprintf(tzBuf, sizeof(tzBuf), "+%.1f", config.timeZone);
+	}
 	else
-		html += String(config.timeZone, 1) + ")</b></span></th>\n";
-	// html += "<th style=\"min-width:16px\">ICON</th>\n";
+	{
+		if (config.timeZone == (int)config.timeZone)
+			snprintf(tzBuf, sizeof(tzBuf), "%d", (int)config.timeZone);
+		else
+			snprintf(tzBuf, sizeof(tzBuf), "%.1f", config.timeZone);
+	}
 
-	html += "<th style=\"width:70pt\">Callsign</th>\n";
-	html += "<th>Message</th>\n";
-	html += "<th style=\"width:10pt\">ACK</th>\n";
-	html += "<th style=\"width:20pt\">msgID</th>\n";
-	html += "</tr>\n";
+	pos += snprintf(buf + pos, BUF_SIZE - pos,
+		"<tr>\n"
+		"<th style=\"width:60pt\"><span><b>Time (%s)</b></span></th>\n"
+		"<th style=\"width:70pt\">Callsign</th>\n"
+		"<th>Message</th>\n"
+		"<th style=\"width:10pt\">ACK</th>\n"
+		"<th style=\"width:20pt\">msgID</th>\n"
+		"</tr>\n", tzBuf);
 
 	pkgMsgSort(msgQueue);
 	for (int i = 0; i < PKGLISTSIZE; i++)
@@ -1176,76 +1239,55 @@ String event_chatMessage(bool gethtml)
 		msgType pkg = getMsgList(i);
 		if (pkg.time > 0)
 		{
-			String line = String(pkg.text);
-
 			pkg.callsign[10] = 0;
-			// time_t tm = pkg.time;
 			localtime_r(&pkg.time, &tmstruct);
 			char strTime[10];
-			// sprintf(strTime, "%02d:%02d:%02d", tmstruct.tm_hour, tmstruct.tm_min, tmstruct.tm_sec);
 			if (tmNow.tm_mday == tmstruct.tm_mday)
 				sprintf(strTime, "%02d:%02d:%02d", tmstruct.tm_hour, tmstruct.tm_min, tmstruct.tm_sec);
 			else
 				sprintf(strTime, "%dd %02d:%02d", tmstruct.tm_mday, tmstruct.tm_hour, tmstruct.tm_min);
-			// String str = String(tmstruct.tm_hour, DEC) + ":" + String(tmstruct.tm_min, DEC) + ":" + String(tmstruct.tm_sec, DEC);
 
+			const char *bgColor;
+			const char *ackText;
+			char ackBuf[16];
 			if (pkg.ack > 0)
 			{
-				html += "<tr style=\"background-color: #f1697dff;\">";
+				bgColor = "#f1697dff";
+				snprintf(ackBuf, sizeof(ackBuf), "%d/%d", pkg.ack, config.msg_retry);
+				ackText = ackBuf;
 			}
 			else if (pkg.ack == -1)
 			{
-				html += "<tr style=\"background-color: #7ff1c5ff;\">";
+				bgColor = "#7ff1c5ff";
+				ackText = "RX";
 			}
 			else if (pkg.ack == -2)
 			{
-				html += "<tr style=\"background-color: #73caf0ff;\">";
+				bgColor = "#73caf0ff";
+				ackText = "TX";
 			}
 			else
 			{
-				html += "<tr style=\"background-color: #f55353ff;\">";
+				bgColor = "#f55353ff";
+				ackText = "TF";
 			}
-			html += "<td>" + String(strTime) + "</td>";
-			html += "<td>" + String(pkg.callsign) + "</td>";
-			html += "<td style=\"text-align: left;\">" + String(pkg.text) + "</td>";
-			if (pkg.ack > 0)
-			{
-				html += "<td>" + String(pkg.ack) + "/" + String(config.msg_retry) + "</td>";
-			}
-			else if (pkg.ack == -1)
-			{
-				html += "<td>RX</td>";
-			}
-			else if (pkg.ack == -2)
-			{
-				html += "<td>TX</td>";
-			}
-			else
-			{
-				html += "<td>TF</td>";
-			}
-			html += "<td>" + String(pkg.msgID) + "</td></tr>";
+			pos += snprintf(buf + pos, BUF_SIZE - pos,
+				"<tr style=\"background-color: %s;\">"
+				"<td>%s</td><td>%s</td>"
+				"<td style=\"text-align: left;\">%s</td>"
+				"<td>%s</td><td>%d</td></tr>",
+				bgColor, strTime, pkg.callsign, pkg.text, ackText, pkg.msgID);
 		}
 	}
-	log_d("HTML Length=%d Byte gethtml:%d event_cnt:%d", html.length(), gethtml, message_events.count());
-	if(gethtml) return html;
-	size_t len = html.length();
-#ifdef BOARD_HAS_PSRAM
-	char *info = (char *)ps_calloc(len + 1, sizeof(char));
-#else
-	char *info = (char *)calloc(len + 1, sizeof(char));
-#endif
-	if(info)
+	log_d("HTML Length=%d Byte gethtml:%d event_cnt:%d", pos, gethtml, message_events.count());
+	if (gethtml)
 	{
-		html.toCharArray(info, len + 1, 0);
-		html.clear();
-		message_events.send(info, "chatMsg", time(NULL), 5000);
-		free(info);
+		String result(buf);
+		free(buf);
+		return result;
 	}
-	else
-	{
-		log_w("event_chatMessage: alloc failed (%d bytes)", len + 1);
-	}
+	message_events.send(buf, "chatMsg", time(NULL), 5000);
+	free(buf);
 	return "";
 }
 

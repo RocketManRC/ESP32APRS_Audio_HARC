@@ -175,24 +175,24 @@ bool IRAM_ATTR RingBuffer_Push(RingBuffer *rb, int16_t data)
 }
 
 // Remove an element from the buffer (pop)
+// Uses portENTER_CRITICAL to synchronize with the ISR's portENTER_CRITICAL_ISR
+// on the same spinlock (timerMux), preventing the count drift race condition
+// that previously caused FIFO corruption and false DCD after 60-90 minutes.
+extern portMUX_TYPE timerMux;
 bool IRAM_ATTR RingBuffer_Pop(RingBuffer *rb, int16_t *data)
 {
-  if (RingBuffer_IsEmpty(rb))
+  portENTER_CRITICAL(&timerMux);
+  if (rb->count == 0)
   {
+    portEXIT_CRITICAL(&timerMux);
     return false; // Buffer is empty
-  }
-  int to = 0;
-  while (rb->lock) // Wait until the buffer is not locked
-  {
-    delay(1); // Avoid busy-waiting, adjust as needed
-    if (to++ > 100)
-      return false; // Timeout after 1 second
   }
   if (rb->tail >= BUFFER_SIZE || rb->tail < 0)
     rb->tail = 0; // Check if tail exceeds buffer size
   *data = rb->buffer[rb->tail];
   rb->tail = (rb->tail + 1) % BUFFER_SIZE; // Wrap around using modulo
   rb->count--;
+  portEXIT_CRITICAL(&timerMux);
   return true;
 }
 
@@ -1007,9 +1007,10 @@ static bool IRAM_ATTR s_conv_done_cb(adc_continuous_handle_t stAdcHandle, const 
     adcPush = (int)p->type2.data;
 #endif
 
+    if (fifo.count >= BUFFER_SIZE)
+      continue; // FIFO full — drop sample to prevent head lapping tail
     if (fifo.head >= BUFFER_SIZE || fifo.head < 0)
-      RingBuffer_Init(&fifo); // Check if head exceeds buffer size
-      //fifo.head = 0; // Check if head exceeds buffer size
+      fifo.head = 0; // Safety: reset head if corrupted
     fifo.buffer[fifo.head] = adcPush;
     fifo.head = (fifo.head + 1) % BUFFER_SIZE; // Wrap around using modulo
     fifo.count++;
