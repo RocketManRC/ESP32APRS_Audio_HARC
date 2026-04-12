@@ -22,6 +22,8 @@ pio run --target clean           # Clean build
 
 Available environments: `esp32-s3-devkitc1-n8r2`, `esp32-s3-devkitc1-n16r8`, `esp32-s3-devkitc-1-n32r8v`, `waveshare_esp32_s3_zero`.
 
+**VS Code extension:** This project is developed with the **`pioarduino`** VS Code extension, **not** the official `PlatformIO` extension. They share the same underlying build system and the same `pio` CLI, so `platformio.ini` and `pio run ...` commands work as expected. The distinction matters when advising on extension setup: once `pioarduino` is installed, VS Code will repeatedly prompt to install the separate `PlatformIO` extension. **This prompt must be declined every time** — installing both extensions breaks the build environment and requires a full uninstall/reinstall to recover. Multiple HARC Builders Group members have been bitten by this, and the README's Development section leads with a `> [!WARNING]` callout about it.
+
 ## Architecture
 
 ### FreeRTOS Task Model
