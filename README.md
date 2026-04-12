@@ -20,6 +20,65 @@ This is a large and actively developed project that provides far more capability
 
 ---
 
+## Getting Started
+
+The fastest path to a working weather station is to flash a pre-built binary using the included browser-based flasher — no toolchain installation required.
+
+### 1. Flash the firmware
+
+1. Connect the ESP32-S3 board to your computer with a **data-capable** USB cable. If the board has **two** USB-C ports, prefer the one labeled **COM** or **UART** — it generally delivers more reliable power and is where debug output appears (see [Which USB port to use](#which-usb-port-to-use) under Development for details). If the board has only one USB-C port, just use it.
+2. Open [`tools/flash.html`](tools/flash.html) in **Chrome or Edge**. (WebSerial is not supported in Safari or Firefox.)
+3. Click **Connect** and choose the board's serial port from the picker.
+4. Select the firmware binary for your board — e.g. [`tools/ESP32APRS-esp32-s3-devkitc1-n16r8.bin`](tools/).
+5. Set the flash address to **`0x0`** (the provided binaries are merged images containing bootloader, partition table, and application).
+6. Click **Flash Firmware** and wait for completion. The board resets automatically when done.
+
+See [`tools/FIRMWARE-FLASHER.md`](tools/FIRMWARE-FLASHER.md) for full flasher documentation and troubleshooting.
+
+### 2. Connect to the board
+
+After the first boot, the board comes up as a Wi-Fi access point:
+
+- **SSID:** `ESP32APRS`
+- **Password:** `ESP32APRS`
+- **Web UI:** <http://192.168.4.1>
+
+Join that network from your computer or phone and open the web UI in a browser. The login user and password are both admin.
+
+During the first three seconds after boot, the status LED cycles red → green → blue. Holding the **BOOT** button during this window triggers a factory reset (the LED will flash white). This is useful if you need to recover from a misconfiguration.
+
+### 3. Configure the board
+
+Work through the web UI pages in this order. You only need to touch a handful of settings for a basic weather station (note that you always have to Apply the change if you make one and switch tabs and come back if you want to make another one).
+
+- **System** — set a unique name for your board's network hostname (e.g. include your callsign), NTP host if desired - ca.pool.ntp.org is good for Canada, Time Zone - need to manually compensate for DST.
+
+  ![System page](image/harc/harc-system-page.png)
+
+- **MOD** (Modem) — in section RF GPIO Modify the PTT GPIO should be set to 16 and select Active: HIGH if using the board's transistor circuit or LOW otherwise. Enable MODBUS Modify if using the Modbus sensor gateway and configure the gateway's IP address. Enable the I2C_(OLED) Modify section if using an I2C sensor such as a BME280 or if using an OLED. SDA GPIO should be set to 12 and SCK to 9.
+
+  ![MOD page](image/harc/harc-mod-page.png)
+
+- **Sensor** — configure each sensor slot: type, scaling, and labels. For sensors that can't be wired directly, this page is also where the Modbus TCP connection to a companion weather gateway is set up. The two examples below show the same BME280 configured both ways — wired directly to the board, and read through a Modbus TCP gateway.
+
+  ![Sensor page — BME280 wired directly](image/harc/harc-sensor-page-bme280.png)
+
+  ![Sensor page — BME280 via Modbus TCP](image/harc/harc-sensor-page-modbus-bme280.png)
+
+- **WX** (Weather) — configure the APRS weather reporting settings and map each configured sensor slot to its corresponding weather field (temperature, humidity, pressure, wind speed and direction, rain, etc.). This is the page that actually controls what gets transmitted as a weather beacon, so it's just as important as the Sensor page — a sensor that is read correctly but not mapped here will not show up in the outgoing APRS packets.
+
+  ![WX page — Modbus BME280 example](image/harc/harc-wx-page-modbus-bme280.png)
+
+- **Wi-Fi** (optional but recommended for setup) — add credentials for your home or club Wi-Fi router. Much easier than using the standalone AP while you're still configuring. You can remove these later for deployment.
+
+  ![Wi-Fi page](image/harc/harc-wifi-page.png)
+
+When you are done, the dashboard page shows received and transmitted packets in real time, and the sensor page shows live values from the sensors or weather gateway.
+
+![Dashboard](image/harc/harc-dashboard-page.png)
+
+---
+
 ## Overview
 
 This fork focuses on making the upstream project easy to build, flash, and configure as a weather station while preserving its other capabilities.
@@ -103,65 +162,6 @@ The following are planned but not yet published:
 ### Weather Sensors
 
 The usual approach is to wire sensors directly to the board; the web UI's **MOD**, **Sensor**, **WX**, and **System** pages cover type selection, scaling, calibration, and how each sensor is mapped into the outgoing APRS weather beacon. When a sensor has to be located away from the board, values can instead be read over Modbus TCP from a companion ESP32-S3 gateway running [ESP32-S3-WX-Modbus](https://github.com/RocketManRC/ESP32-S3-WX-Modbus) — the APRS firmware connects to that gateway's access point (default `192.168.4.2`, port 502) and reads holding registers mapped to individual weather measurements.
-
----
-
-## Getting Started
-
-The fastest path to a working weather station is to flash a pre-built binary using the included browser-based flasher — no toolchain installation required.
-
-### 1. Flash the firmware
-
-1. Connect the ESP32-S3 board to your computer with a **data-capable** USB cable. If the board has **two** USB-C ports, prefer the one labeled **COM** or **UART** — it generally delivers more reliable power and is where debug output appears (see [Which USB port to use](#which-usb-port-to-use) under Development for details). If the board has only one USB-C port, just use it.
-2. Open [`tools/flash.html`](tools/flash.html) in **Chrome or Edge**. (WebSerial is not supported in Safari or Firefox.)
-3. Click **Connect** and choose the board's serial port from the picker.
-4. Select the firmware binary for your board — e.g. [`tools/ESP32APRS-esp32-s3-devkitc1-n16r8.bin`](tools/).
-5. Set the flash address to **`0x0`** (the provided binaries are merged images containing bootloader, partition table, and application).
-6. Click **Flash Firmware** and wait for completion. The board resets automatically when done.
-
-See [`tools/FIRMWARE-FLASHER.md`](tools/FIRMWARE-FLASHER.md) for full flasher documentation and troubleshooting.
-
-### 2. Connect to the board
-
-After the first boot, the board comes up as a Wi-Fi access point:
-
-- **SSID:** `ESP32APRS`
-- **Password:** `ESP32APRS`
-- **Web UI:** <http://192.168.4.1>
-
-Join that network from your computer or phone and open the web UI in a browser. The login user and password are both admin.
-
-During the first three seconds after boot, the status LED cycles red → green → blue. Holding the **BOOT** button during this window triggers a factory reset (the LED will flash white). This is useful if you need to recover from a misconfiguration.
-
-### 3. Configure the board
-
-Work through the web UI pages in this order. You only need to touch a handful of settings for a basic weather station (note that you always have to Apply the change if you make one and switch tabs and come back if you want to make another one).
-
-- **System** — set a unique name for your board's network hostname (e.g. include your callsign), NTP host if desired - ca.pool.ntp.org is good for Canada, Time Zone - need to manually compensate for DST.
-
-  ![System page](image/harc/harc-system-page.png)
-
-- **MOD** (Modem) — in section RF GPIO Modify the PTT GPIO should be set to 16 and select Active: HIGH if using the board's transistor circuit or LOW otherwise. Enable MODBUS Modify if using the Modbus sensor gateway and configure the gateway's IP address. Enable the I2C_(OLED) Modify section if using an I2C sensor such as a BME280 or if using an OLED. SDA GPIO should be set to 12 and SCK to 9.
-
-  ![MOD page](image/harc/harc-mod-page.png)
-
-- **Sensor** — configure each sensor slot: type, scaling, and labels. For sensors that can't be wired directly, this page is also where the Modbus TCP connection to a companion weather gateway is set up. The two examples below show the same BME280 configured both ways — wired directly to the board, and read through a Modbus TCP gateway.
-
-  ![Sensor page — BME280 wired directly](image/harc/harc-sensor-page-bme280.png)
-
-  ![Sensor page — BME280 via Modbus TCP](image/harc/harc-sensor-page-modbus-bme280.png)
-
-- **WX** (Weather) — configure the APRS weather reporting settings and map each configured sensor slot to its corresponding weather field (temperature, humidity, pressure, wind speed and direction, rain, etc.). This is the page that actually controls what gets transmitted as a weather beacon, so it's just as important as the Sensor page — a sensor that is read correctly but not mapped here will not show up in the outgoing APRS packets.
-
-  ![WX page — Modbus BME280 example](image/harc/harc-wx-page-modbus-bme280.png)
-
-- **Wi-Fi** (optional but recommended for setup) — add credentials for your home or club Wi-Fi router. Much easier than using the standalone AP while you're still configuring. You can remove these later for deployment.
-
-  ![Wi-Fi page](image/harc/harc-wifi-page.png)
-
-When you are done, the dashboard page shows received and transmitted packets in real time, and the sensor page shows live values from the sensors or weather gateway.
-
-![Dashboard](image/harc/harc-dashboard-page.png)
 
 ---
 
