@@ -25,7 +25,7 @@ This is a large and actively developed project that provides far more capability
 This fork focuses on making the upstream project easy to build, flash, and configure as a weather station while preserving its other capabilities.
 
 - **Customized for the HARC Builders Group's objectives.** Default configuration, documentation, and tooling have been tailored to a weather station use case, so a new builder can go from a blank board to a transmitting station with a minimum of setup.
-- **Compatible with readily available ESP32-S3 development boards.** Pre-built firmware and PlatformIO build environments are provided for several common boards — see [Hardware](#hardware) below.
+- **Compatible with readily available ESP32-S3 development boards.** Pre-built firmware and build environments are provided for several common boards — see [Hardware](#hardware) below.
 - **Custom PCB.** A simple carrier board was designed by the Builders Group to simplify construction, provide connections for the audio interface and sensors, and make the project approachable for members who are new to embedded electronics.
 - **Flexible sensor integration.** The primary way to connect weather sensors is to wire them directly to the board and configure them through the **MOD**, **Sensor**, and **System** pages of the web UI. For situations where a sensor can't conveniently be located close to the board, a secondary path uses **Modbus TCP** to read values from a remote gateway — see the companion project [ESP32-S3-WX-Modbus](https://github.com/RocketManRC/ESP32-S3-WX-Modbus). The upstream Modbus code only supported serial (RTU); this fork adds TCP by migrating to a local copy of [eModbus](https://github.com/eModbus/eModbus). (Modbus RTU is not currently wired up but the code path is retained for future work.)
 - **Bug fixes contributed upstream.** Several issues were identified and fixed during evaluation, including a TX/RX mode-switching bug on the ESP32-S3, a ring-buffer race condition that caused long-running dashboard freezes, an inverted LED debounce, and SSE memory growth on the dashboard. These fixes have been reported to the upstream author.
@@ -58,7 +58,7 @@ See [`README-upstream.md`](README-upstream.md) for the complete upstream feature
 
 ### Development Boards
 
-This fork targets the **ESP32-S3**. The following PlatformIO build environments are provided in [`platformio.ini`](platformio.ini):
+This fork targets the **ESP32-S3**. The following build environments are provided in [`platformio.ini`](platformio.ini):
 
 | Environment                 | Flash / PSRAM           | Notes                    |
 | --------------------------- | ----------------------- | ------------------------ |
